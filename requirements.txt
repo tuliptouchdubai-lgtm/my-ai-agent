@@ -7,5 +7,5 @@ langchain-core==0.1.52
 chainlit==1.1.304
 ollama==0.6.2
 python-dotenv==1.0.0
-pillow==10.3.0
+pillow==10.3.0   # ✅ added safe version
 
