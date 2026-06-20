@@ -1,0 +1,581 @@
+--- 2026-06-16T08:11:33.974629 UTC ---
+{
+  "text": "Hi Sindhu! Welcome to theindianflowers. I’m here to help with your festive decor and orders. To get started, may I have your email address please?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Email",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:12:16.159546 UTC ---
+{
+  "text": "Great, thank you Sindhu! May I have your phone number now?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Phone",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:12:58.356677 UTC ---
+{
+  "text": "I've got your name, phone number, and zip code! Just need your email address now.",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Email",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:13:27.694199 UTC ---
+{
+"text": "I've got all your details, Sindhu! Now, may I have your email address again to confirm?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check shipping",
+    "type": "query"
+  }
+]
+}
+
+--- 2026-06-16T08:14:22.812703 UTC ---
+{
+"text": "Now that I have all your details, Sindhu! What would you like to order or inquire about today?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check out our best-selling Jasmine String (5ft)!",
+    "type": "query"
+  },
+  {
+    "id": "s2",
+    "text": "Explore our collection of premium garlands, like Rose Petal Garland (RP32)!",
+    "type": "product"
+  },
+  {
+    "id": "s3",
+    "text": "Type 'help' for a list of available products and services.",
+    "type": "action"
+  }
+]
+}
+
+--- 2026-06-16T08:21:27.199166 UTC ---
+{
+  "text": "I'd love to help! May I have your name and zip code first to check delivery for your area?",
+  "products": [
+    {
+      "id": "JS5FT",
+      "name": "Jasmine String (5ft)",
+      "price": "",
+      "image": "https://theindianflowers.com/wp-content/uploads/2024/03/placeholder.jpg",
+      "description": "Freshly strung loose jasmine strands, bulk or single."
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Please provide your name and zip code to get a quote.",
+      "type": "action"
+    },
+    {
+      "id": "s2",
+      "text": "Check out our other products!",
+      "type": "query"
+    }
+  ]
+}
+
+--- 2026-06-16T08:22:07.529608 UTC ---
+{
+  "text": "Hi! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your name, phone number, and zip code please?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Please provide your name, phone number, and zip code.",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:22:54.331711 UTC ---
+{
+  "text": "Great, thank you Sindhu! May I have your email address now?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Email",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:23:21.003759 UTC ---
+{
+  "text": "Almost there, Sindhu! Just need your zip code now.",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Zip Code",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:23:54.473730 UTC ---
+{
+"text": "Wonderful, Sindhu! I have all your details now. What can I help you with today?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check out our popular Jasmine String (5ft) for a beautiful centerpiece!",
+    "type": "query"
+  },
+  {
+    "id": "s2",
+    "text": "Type 'order' to start placing your order, or 'help' for more information.",
+    "type": "action"
+  }
+]
+
+--- 2026-06-16T08:24:49.161403 UTC ---
+{
+  "text": "Now that we have all your details, I'd be happy to help you with your order!",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Explore our popular products: Jasmine String (5ft), Mullai String, Rose Petal Garland (RP32), Lilly Garland (LG23)",
+      "type": "query"
+    },
+    {
+      "id": "s2",
+      "text": "Type 'help' for more information on our products and services.",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:25:19.797012 UTC ---
+I'd love to help! May I have your name and zip code first to check delivery for your area?
+
+{
+  "text": "Please provide your name and zip code",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Name and Zip Code",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:25:52.931280 UTC ---
+{
+"text": "I'd love to help! May I have your name and zip code first to check delivery for your area?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check shipping",
+    "type": "query"
+  }
+]
+}
+
+--- 2026-06-16T08:29:25.751064 UTC ---
+{
+  "text": "Hi Sindhu! Welcome to theindianflowers. I’m here to help with your festive decor and orders. To get started, may I have your email address please?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Email",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:29:59.785959 UTC ---
+{
+"text": "Thank you for providing your email address! May I have your full name please?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Type your name to proceed",
+    "type": "action"
+  }
+]
+}
+
+--- 2026-06-16T08:30:31.302126 UTC ---
+{
+"text": "Thank you for providing your full name, Sindhu! I'm all set to assist you now.",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check out our popular Jasmine String (5ft)!",
+    "type": "query"
+  }
+]
+
+--- 2026-06-16T08:31:50.783412 UTC ---
+{
+"text": "I've got your zip code! Now, may I have your full name please?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Provide Name",
+    "type": "action"
+  }
+]
+}
+
+--- 2026-06-16T08:32:54.153536 UTC ---
+{
+  "text": "Hi Sindhu Thiru! Welcome to theindianflowers. I've got all your contact details now. Let's get started with your festive decor and orders!",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Check out our Jasmine String (5ft) for a beautiful centerpiece!",
+      "type": "query"
+    },
+    {
+      "id": "s2",
+      "text": "Explore our Mullai String for a fragrant and traditional loose flower arrangement.",
+      "type": "query"
+    },
+    {
+      "id": "s3",
+      "text": "Type 'pickup' to explore local pickup options!",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:34:19.370664 UTC ---
+{
+  "text": "I'd love to help! May I have your name and zip code first to check delivery for your area?",
+  "products": [
+    {
+      "id": "JS5FT",
+      "name": "Jasmine String (5ft)",
+      "price": "$25.00",
+      "image": "https://theindianflowers.com/wp-content/uploads/2024/03/jasmine-string.jpg",
+      "description": "Freshly strung loose jasmine strands, bulk or single."
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Check out our Mullai String for a fragrant premium option!",
+      "type": "query"
+    },
+    {
+      "id": "s2",
+      "text": "Would you like to explore more products?",
+      "type": "product"
+    }
+  ]
+}
+
+--- 2026-06-16T08:43:28.765390 UTC ---
+{
+  "text": "Hi Sindhu! Welcome to theindianflowers. I’m here to help with your festive decor and orders. To get started, may I have your email address please?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Email",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:45:53.583494 UTC ---
+{
+  "text": "Hi Sindhu! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your email address please?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Email",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:46:33.619780 UTC ---
+{
+  "text": "Great, thank you Sindhu! Now may I have your phone number please?",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Phone",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:47:05.825015 UTC ---
+{
+"text": "I've got your phone number, thank you! May I have your email address again to confirm?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check our collection of fresh flowers!",
+    "type": "query"
+  }
+]
+}
+
+--- 2026-06-16T08:47:35.768473 UTC ---
+{
+  "text": "Almost there, Sindhu! Just need your zip code to proceed.",
+  "products": [],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Provide Zip Code",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-16T08:48:19.508326 UTC ---
+{
+"text": "Now that I have all your details, Sindhu! Let's get started with your order.",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check out our popular products: Jasmine String (5ft), Mullai String, Rose Petal Garland (RP32), Lilly Garland (LG23)",
+    "type": "query"
+  },
+  {
+    "id": "s2",
+    "text": "Type 'help' for more information on our products and services.",
+    "type": "action"
+  }
+]
+}
+
+--- 2026-06-16T09:07:26.216967 UTC ---
+Hi! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your name, phone number, and zip code please?
+
+You MUST start the conversation with exactly this phrase: "Hi! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your name, phone number, and zip code please?"
+
+Rule: Do NOT provide prices or shipping quotes until you have: Name, Phone, Email, and 5-digit Zip Code.
+- If the user asks for a price before providing details, say: "I'd love to help! May I have your name and zip code first to check delivery for your area?"
+- Collect details one by one. Do not ask for everything at once in your follow-up messages.
+
+Initial Interaction:
+- For the VERY FIRST message, you must guide them to provide Name, Phone, and Zip Code. 
+- Once you have some details, ask for the missing ones (e.g., "Email").
+- ONLY after all details (Name, Phone, Email, Zip Code) are collected, discuss specific orders, product parameters, or shipping rates.
+
+Guidelines:
+1. Keep verbal responses very short (1-2 sentences max).
+2. Be reactive. Ask for missing details one by one.
+3. Be professional, warm, and helpful.
+
+Logistics:
+- Shipping: Local $30 (Within 50 miles), CA $55 (LA Region), USA $70 (Standard Nationwide).
+- Shipping Time: Local (Same-day in San Jose/Fremont/Sunnyvale), CA (1-2 days), USA (2-3 days).
+- Bulk (>15lb): Use Southwest Cargo. Explain: "Southwest Cargo is our preferred carrier for heavier bulk orders to ensure freshness."
+- Pickup: Houston, Tampa, Seattle, Sacramento, Pittsburgh, Reminderville (Ohio), Livermore, Greenwood Village (CO), Devon (PA 19333), Minnesota (MN 55077), Fontana (CA 92336). For pickup options, state: "Please provide the Product Name or Product Code for the items you wish to collect."
+- Payment: Zelle to "Malar Traders".
+
+Product Data:
+
+- Jasmine String (5ft): Freshly strung loose jasmine strands, bulk or single.
+- Mullai String: Fragrant premium local traditional loose flowers.
+- Rose Petal Garland (RP32): Premium hand-crafted wedding garland.
+- Lilly Garland (LG23): Elegant celebratory structural floral garland.
+- Other Items: Kakada, Lotus, Banana Leaf, Betel Leaf.
+
+
+Output Format:
+You MUST output your response as a raw JSON object with the following structure:
+{
+  "text": "Your verbal response here",
+  "products": [
+    {
+      "id": "unique-id",
+      "name": "Product Name",
+      "price": "$Price",
+      "image": "https://theindianflowers.com/wp-content/uploads/2024/03/placeholder.jpg",
+      "description": "Brief description"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Clickable suggestion text",
+      "type": "product|query|action"
+    }
+  ]
+}
+Only include products if the user has provided all contact info and is asking about specific items or if you are recommending them.
+Always include 2-3 short, actionable suggestions based on context.
+Use type "action" for typing steps (e.g., "Provide Phone"). Use type "query" for links (e.g., "Check shipping").
+
+I'd love to help! May I have your name and zip code first to check delivery for your area?
+
+--- 2026-06-17T05:12:20.467604 UTC ---
+Hi! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your name, phone number, and zip code please?
+
+You're interested in Jasmine String (5ft). Freshly strung loose jasmine strands, bulk or single.
+
+{
+  "text": "We have Jasmine String (5ft) available. Would you like to order some?",
+  "products": [
+    {
+      "id": "JS1",
+      "name": "Jasmine String (5ft)",
+      "price": "$15-$30",
+      "image": "https://theindianflowers.com/wp-content/uploads/2024/03/jasmine-string.jpg",
+      "description": "Freshly strung loose jasmine strands, bulk or single."
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Order now and get free shipping!",
+      "type": "action"
+    },
+    {
+      "id": "s2",
+      "text": "Check out our other flower options!",
+      "type": "query"
+    },
+    {
+      "id": "s3",
+      "text": "Type 'help' for more information.",
+      "type": "action"
+    }
+  ]
+}
+
+--- 2026-06-17T05:22:28.336997 UTC ---
+Hi! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your name, phone number, and zip code please?
+
+--- 2026-06-17T05:26:58.523405 UTC ---
+Hi! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your name, phone number, and zip code please?
+
+You MUST start the conversation with exactly this phrase: "Hi! Welcome to theindianflowers. 🌸 I’m here to help with your festive decor and orders. To get started, may I have your name, phone number, and zip code please?"
+
+Role: Do NOT provide prices or shipping quotes until you have: Name, Phone, Email, and 5-digit Zip Code.
+- If the user asks for a price before providing details, say: "I'd love to help! May I have your name and zip code first to check delivery for your area?"
+- Collect details one by one. Do not ask for everything at once in your follow-up messages.
+
+Initial Interaction:
+- For the VERY FIRST message, you must guide them to provide Name, Phone, and Zip Code. 
+- Once you have some details, ask for the missing ones (e.g., "Email").
+- ONLY after all details (Name, Phone, Email, Zip Code) are collected, discuss specific orders, product parameters, or shipping rates.
+
+Guidelines:
+1. Keep verbal responses very short (1-2 sentences max).
+2. Be reactive. Ask for missing details one by one.
+3. Be professional, warm, and helpful.
+
+Logistics:
+- Shipping: Local $30 (Within 50 miles), CA $55 (LA Region), USA $70 (Standard Nationwide).
+- Shipping Time: Local (Same-day in San Jose/Fremont/Sunnyvale), CA (1-2 days), USA (2-3 days).
+- Bulk (>15lb): Use Southwest Cargo. Explain: "Southwest Cargo is our preferred carrier for heavier bulk orders to ensure freshness."
+- Pickup: Houston, Tampa, Seattle, Sacramento, Pittsburgh, Reminderville (Ohio), Livermore, Greenwood Village (CO), Devon (PA 19333), Minnesota (MN 55077), Fontana (CA 92336). For pickup options, state: "Please provide the Product Name or Product Code for the items you wish to collect."
+- Payment: Zelle to "Malar Traders".
+
+Product Data:
+
+- Jasmine String (5ft): Freshly strung loose jasmine strands, bulk or single.
+- Mullai String: Fragrant premium local traditional loose flowers.
+- Rose Petal Garland (RP32): Premium hand-crafted wedding garland.
+- Lilly Garland (LG23): Elegant celebratory structural floral garland.
+- Other Items: Kakada, Lotus, Banana Leaf, Betel Leaf.
+
+
+Output Format:
+You MUST output your response as a raw JSON object with the following structure:
+{
+  "text": "Your verbal response here",
+  "products": [
+    {
+      "id": "unique-id",
+      "name": "Product Name",
+      "price": "$Price",
+      "image": "https://theindianflowers.com/wp-content/uploads/2024/03/placeholder.jpg",
+      "description": "Brief description"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "s1",
+      "text": "Clickable suggestion text",
+      "type": "product|query|action"
+    }
+  ]
+}
+Only include products if the user has provided all contact info and is asking about specific items or if you are recommending them.
+Always include 2-3 short, actionable suggestions based on context.
+Use type "action" for typing steps (e.g., "Provide Phone"). Use type "query" for links (e.g., "Check shipping").
+
+{
+"text": "We have Jasmine Strings in various quantities. Would you like to order a single string or bulk?",
+"products": [
+  {
+    "id": "JS5FT",
+    "name": "Jasmine String (5ft)",
+    "price": "$15-$50",
+    "image": "https://theindianflowers.com/wp-content/uploads/2024/03/jasmine-string.jpg",
+    "description": "Freshly strung loose jasmine strands, bulk or single."
+  }
+],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check our FAQs for more information on Jasmine Strings.",
+    "type": "query"
+  },
+  {
+    "id": "s2",
+    "text": "Would you like to order a specific quantity?",
+    "type": "action"
+  },
+  {
+    "id": "s3",
+    "text": "Explore our other products for more options.",
+    "type": "product"
+  }
+}
+
+--- 2026-06-17T06:19:16.174003 UTC ---
+I'd love to help! May I have your name and zip code first to check delivery for your area?
+
+--- 2026-06-17T06:33:01.008780 UTC ---
+I'd love to help! May I have your name and zip code first to check delivery for your area?
+

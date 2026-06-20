@@ -1,0 +1,35 @@
+--- 2026-06-16T08:23:54.477196 UTC ---
+Failed to parse Ollama response.
+Candidate:
+{
+"text": "Wonderful, Sindhu! I have all your details now. What can I help you with today?",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check out our popular Jasmine String (5ft) for a beautiful centerpiece!",
+    "type": "query"
+  },
+  {
+    "id": "s2",
+    "text": "Type 'order' to start placing your order, or 'help' for more information.",
+    "type": "action"
+  }
+
+Expecting ',' delimiter: line 12 column 20 (char 297)
+
+--- 2026-06-16T08:30:31.303199 UTC ---
+Failed to parse Ollama response.
+Candidate:
+{
+"text": "Thank you for providing your full name, Sindhu! I'm all set to assist you now.",
+"products": [],
+"suggestions": [
+  {
+    "id": "s1",
+    "text": "Check out our popular Jasmine String (5ft)!",
+    "type": "query"
+  }
+
+Expecting ',' delimiter: line 2 column 60 (char 61)
+

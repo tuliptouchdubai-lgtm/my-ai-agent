@@ -1,0 +1,7 @@
+chainlit==1.1.304
+langchain==0.1.17
+langchain-community==0.0.38
+langchain-core==0.1.44
+ollama==0.1.49
+pydantic==2.6.4
+python-dotenv==1.0.0
