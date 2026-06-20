@@ -3,5 +3,5 @@ langchain==0.1.17
 langchain-community==0.0.38
 langchain-core==0.1.52
 ollama==0.6.2
-pydantic==2.6.4
+pydantic==2.9.2
 python-dotenv==1.0.0
