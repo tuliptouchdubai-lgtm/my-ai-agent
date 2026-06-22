@@ -846,7 +846,7 @@ if user_input := st.chat_input("Type your message here..."):
                     if "connect" in err or "refused" in err:
                         reply = "⚠️ Cannot reach Ollama. Please run `ollama serve` and try again."
                     else:
-                        reply = "I had a hiccup — please try again! 🙏"
+                        reply = f"⚠️ {str(e)}"
                         print(f"[Chain error]: {e}")
             st.markdown(reply)
 
