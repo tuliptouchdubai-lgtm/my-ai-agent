@@ -243,7 +243,8 @@ st.write(
     "- Paste a customer message and verify that the correct products and quantities are parsed.\n"
     "- Check the shipping fee for local CA zips, CA state zips, and other USA zips.\n"
     "- This app is intended for testing the order capture and pricing logic independent of the LLM chat flow."
-)import os
+)
+import os
 import re
 import json
 import streamlit as st # type: ignore
