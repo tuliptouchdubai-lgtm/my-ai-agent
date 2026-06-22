@@ -1,8 +1,10 @@
 import os
 import re
 import json
+import csv
 import subprocess
 import sys
+import requests
 import streamlit as st
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -92,12 +94,15 @@ def load_knowledge() -> str:
 WEBSITE_INFO = load_knowledge()
 
 # ─────────────────────────────────────────────
-# 4. PRODUCT CATALOG
+# 4. PRODUCT CATALOG — live from Google Sheet
 # ─────────────────────────────────────────────
-PRODUCTS = {
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT_ZU0NyUc0xJW32p9emliJOWofbNRa9ufZxe8vWc7FXSBD_tTmfW9fmLMZgwsxkpAReC8x9tB3NelK/pub?gid=0&single=true&output=csv"
+
+# Fallback in case Google Sheet is unreachable
+FALLBACK_PRODUCTS = {
     "jasmine string":        {"price": 13.00,  "unit": "box (5 ft)"},
     "jathimalli string":     {"price": 15.00,  "unit": "box (5 ft)"},
-    "mullai string":         {"price": 15.00,  "unit": "box (5 ft)"},
+    "mullai string":         {"price": 13.00,  "unit": "box (5 ft)"},
     "kathambam string":      {"price": 15.00,  "unit": "box (5 ft)"},
     "kanakambaram string":   {"price": 15.00,  "unit": "box (5 ft)"},
     "neem flowers":          {"price": 10.00,  "unit": "100g"},
@@ -145,6 +150,43 @@ PRODUCTS = {
     "vadamalli garland":     {"price": 26.00,  "unit": "per foot"},
     "bouquet":               {"price": 8.00,   "unit": "piece"},
 }
+
+@st.cache_data(ttl=3600)  # refresh every 1 hour
+def load_products_from_sheet() -> dict:
+    """Load product prices live from Google Sheet CSV.
+    Sheet must have columns: product_name, price, unit
+    """
+    try:
+        response = requests.get(SHEET_CSV_URL, timeout=10)
+        response.raise_for_status()
+        lines = response.text.strip().splitlines()
+        reader = csv.DictReader(lines)
+        products = {}
+        for row in reader:
+            name  = row.get("product_name", "").strip().lower()
+            price = row.get("price", "").strip()
+            unit  = row.get("unit", "").strip()
+            if name and price:
+                try:
+                    products[name] = {"price": float(price), "unit": unit}
+                except ValueError:
+                    pass
+        if products:
+            print(f"[Google Sheet] Loaded {len(products)} products successfully.")
+            return products
+        else:
+            raise ValueError("Sheet returned empty product list")
+    except Exception as e:
+        print(f"[Google Sheet error]: {e} — using fallback prices")
+        return FALLBACK_PRODUCTS
+
+PRODUCTS = load_products_from_sheet()
+
+# Show price source in sidebar for transparency
+if PRODUCTS == FALLBACK_PRODUCTS:
+    st.sidebar.warning("⚠️ Using fallback prices (Google Sheet unavailable)")
+else:
+    st.sidebar.success(f"✅ Live prices loaded from Google Sheet ({len(PRODUCTS)} products)")
 
 PRODUCT_CATALOG_TEXT = "\n".join(
     f"  - {name.title()}: ${v['price']:.2f} per {v['unit']}"
