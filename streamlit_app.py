@@ -290,9 +290,6 @@ chat_llm, extract_llm = get_llms()
 # ─────────────────────────────────────────────
 # 2. KNOWLEDGE BASE — cached
 # ─────────────────────────────────────────────
-import requests
-from bs4 import BeautifulSoup
-
 @st.cache_data(ttl=3600)
 def load_knowledge() -> str:
     try:
