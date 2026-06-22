@@ -294,14 +294,17 @@ chat_llm, extract_llm = get_llms()
 @st.cache_data(ttl=3600)
 def load_knowledge() -> str:
     try:
-        response = requests.get("https://theindianflowers.com/", timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        for tag in soup(["script", "style", "nav", "footer", "header"]):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
-        return text[:5000]
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto("https://theindianflowers.com/", timeout=30000)
+            page.wait_for_load_state("networkidle", timeout=30000)
+            content = page.inner_text("body")
+            browser.close()
+            return content[:5000]
     except Exception as e:
-        print(f"[Website fetch error]: {e}")
+        print(f"[Playwright fetch error]: {e}")
         return (
             "The Indian Flowers USA (Malar Traders) delivers fresh Indian flowers "
             "and garlands nationwide across the USA."
