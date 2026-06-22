@@ -1,254 +1,10 @@
 import os
 import re
 import json
-import requests
-from bs4 import BeautifulSoup
+import subprocess
+import sys
 import streamlit as st
-
-st.set_page_config(
-    page_title="The Indian Flowers USA Tester",
-    layout="wide",
-)
-
-PRODUCTS = {
-    "jasmine string":            {"price": 13.00,  "unit": "box (5 ft)"},
-    "jathimalli string":         {"price": 15.00,  "unit": "box (5 ft)"},
-    "mullai string":             {"price": 15.00,  "unit": "box (5 ft)"},
-    "kathambam string":          {"price": 15.00,  "unit": "box (5 ft)"},
-    "kanakambaram string":       {"price": 15.00,  "unit": "box (5 ft)"},
-    "neem flowers":              {"price": 10.00,  "unit": "100g"},
-    "jasmine flowers":           {"price": 10.00,  "unit": "100g"},
-    "mullai loose":              {"price": 10.00,  "unit": "100g"},
-    "kanakambaram":              {"price": 10.00,  "unit": "100g"},
-    "lilly loose":               {"price": 8.00,   "unit": "100g"},
-    "marigold loose":            {"price": 8.00,   "unit": "100g"},
-    "yellow rose":               {"price": 6.00,   "unit": "100g"},
-    "red rose":                  {"price": 6.00,   "unit": "100g"},
-    "arali pink":                {"price": 6.00,   "unit": "100g"},
-    "arali red":                 {"price": 6.00,   "unit": "100g"},
-    "lotus flowers":             {"price": 2.00,   "unit": "piece"},
-    "turmeric":                  {"price": 8.00,   "unit": "each"},
-    "avarampoo":                 {"price": 10.00,  "unit": "100g"},
-    "tulasi leaves":             {"price": 10.00,  "unit": "100g"},
-    "neem leaf":                 {"price": 10.00,  "unit": "100g"},
-    "vilvam leaves":             {"price": 10.00,  "unit": "100g"},
-    "erukkam leaves":            {"price": 10.00,  "unit": "100g"},
-    "marikolunthu":              {"price": 10.00,  "unit": "100g"},
-    "maruvam":                   {"price": 10.00,  "unit": "100g"},
-    "betel leaf":                {"price": 6.00,   "unit": "pack of 25"},
-    "mango leaf":                {"price": 2.00,   "unit": "pack of 10"},
-    "mango leaf thoranam":       {"price": 5.00,   "unit": "4 ft"},
-    "banana leaf":               {"price": 10.00,  "unit": "pack"},
-    "coconut thoranam":          {"price": 5.00,   "unit": "5 pieces"},
-    "ala mokku":                 {"price": 10.00,  "unit": "pack"},
-    "marigold garland":          {"price": 20.00,  "unit": "per foot"},
-    "rose petal garland":        {"price": 100.00, "unit": "pair (4 ft total)"},
-    "carnation garland":         {"price": 100.00, "unit": "pair (4 ft total)"},
-    "lilly garland":             {"price": 100.00, "unit": "pair (4 ft total)"},
-    "lily garland":              {"price": 100.00, "unit": "pair (4 ft total)"},
-    "exchange garland":          {"price": 80.00,  "unit": "pair"},
-    "button rose garland":       {"price": 26.00,  "unit": "per foot (each side)"},
-    "wedding garland":           {"price": 100.00, "unit": "pair (4 ft total)"},
-    "north indian garland":      {"price": 100.00, "unit": "pair"},
-    "door garland":              {"price": 130.00, "unit": "10 ft set"},
-    "house warming garland":     {"price": 130.00, "unit": "10 ft set"},
-    "veni":                      {"price": 15.00,  "unit": "piece"},
-    "jadai":                     {"price": 15.00,  "unit": "piece"},
-    "veni jadai":                {"price": 80.00,  "unit": "set"},
-    "gajra":                     {"price": 80.00,  "unit": "set"},
-    "temple garland":            {"price": 26.00,  "unit": "per foot"},
-    "pooja garland":             {"price": 26.00,  "unit": "per foot"},
-    "vadamalli garland":         {"price": 26.00,  "unit": "per foot"},
-    "bouquet":                   {"price": 8.00,   "unit": "piece"},
-}
-
-LOCAL_ZIPS = {
-    "92335","92336","92337","92316","92324","92376","92377",
-    "91710","91761","91762","91763","91764","91766","91767","91768",
-}
-
-CA_PREFIXES = {
-    "900","901","902","903","904","905","906","907","908",
-    "910","911","912","913","914","915","916","917","918","919",
-    "920","921","922","923","924","925","926","927","928",
-    "930","931","932","933","934","935","936","937","938","939",
-    "940","941","942","943","944","945","946","947","948","949",
-    "950","951","952","953","954","955","956","957","958","959","960","961",
-}
-
-ORDER_KEYWORDS = list(PRODUCTS.keys())
-
-
-def calculate_shipping(zip_code: str, weight_lbs: float = 2.0) -> dict:
-    z = zip_code.strip()
-    if z in LOCAL_ZIPS:
-        return {
-            "fee": 30.00,
-            "method": "Local Delivery (within 50 miles)",
-            "note": "Delivered fresh same/next day.",
-        }
-    if len(z) >= 3 and z[:3] in CA_PREFIXES:
-        return {
-            "fee": 55.00,
-            "method": "California State Shipping",
-            "note": "Delivered in 1-2 business days.",
-        }
-    if weight_lbs > 15:
-        return {
-            "fee": 0.00,
-            "method": "Southwest Cargo (Bulk Order)",
-            "note": "Southwest Cargo preferred for freshness. Rate quoted separately.",
-        }
-    return {
-        "fee": 70.00,
-        "method": "Nationwide USA Shipping",
-        "note": "Delivered in 2-3 business days via overnight cold-pack.",
-    }
-
-
-def parse_order_items(text: str) -> list:
-    found = []
-    seen = set()
-    low = text.lower()
-    for name, info in PRODUCTS.items():
-        if name in low and name not in seen:
-            match = re.search(
-                r"(\d+(?:\.\d+)?)\s*(?:feet|ft|foot|box(?:es)?|piece[s]?|pair[s]?|bunch(?:es)?|set[s]?|pack(?:s)?|each)?\s*(?:of\s*)?"
-                + re.escape(name),
-                low,
-            )
-            if not match:
-                match = re.search(r"(\d+(?:\.\d+)?)\s*" + re.escape(name), low)
-            qty = float(match.group(1)) if match else 1.0
-            found.append({
-                "name": name,
-                "qty": qty,
-                "unit_price": info["price"],
-                "unit": info["unit"],
-            })
-            seen.add(name)
-    return found
-
-
-def build_order_summary(items: list, zip_code: str) -> dict:
-    subtotal = sum(i["qty"] * i["unit_price"] for i in items)
-    weight = len(items) * 1.5
-    shipping = calculate_shipping(zip_code, weight)
-    grand_total = subtotal + shipping["fee"]
-    return {
-        "items": items,
-        "subtotal": subtotal,
-        "shipping": shipping,
-        "grand_total": grand_total,
-    }
-
-
-def format_order_summary(summary: dict) -> str:
-    lines = ["ORDER SUMMARY"]
-    for item in summary["items"]:
-        lines.append(
-            f"• {item['qty']} x {item['name'].title()} @ ${item['unit_price']:.2f}/{item['unit']} = ${item['qty'] * item['unit_price']:.2f}"
-        )
-    lines.append(f"Subtotal: ${summary['subtotal']:.2f}")
-    lines.append(
-        f"Shipping: ${summary['shipping']['fee']:.2f} ({summary['shipping']['method']})"
-    )
-    lines.append(f"Grand Total: ${summary['grand_total']:.2f}")
-    lines.append(f"Note: {summary['shipping']['note']}")
-    return "\n".join(lines)
-
-
-def validate_zip(zip_code: str) -> bool:
-    return bool(re.fullmatch(r"\d{5}", zip_code.strip()))
-
-
-def render_product_catalog():
-    lines = [f"{name.title()} — ${info['price']:.2f} / {info['unit']}" for name, info in PRODUCTS.items()]
-    return "\n".join(lines)
-
-
-st.title("The Indian Flowers USA — Streamlit Test App")
-st.markdown(
-    "Use this tool to validate order parsing, shipping logic, and pricing calculations for the customer flow."
-)
-
-with st.sidebar:
-    st.header("Customer Details")
-    customer_name = st.text_input("Name", "Ananya")
-    phone = st.text_input("Phone", "9091234567")
-    email = st.text_input("Email", "ananya@example.com")
-    zip_code = st.text_input("ZIP Code", "92336")
-    st.markdown("---")
-    st.markdown("**Shipping rules**")
-    st.write("Local delivery: $30 (selected local zips)")
-    st.write("California state: $55")
-    st.write("Nationwide USA: $70")
-    st.write("Bulk over 15 lbs: quoted separately")
-
-st.subheader("Order Input")
-order_text = st.text_area(
-    "Customer message / order details",
-    "I need 2 jasmine strings and 1 rose petal garland for a wedding",
-    height=180,
-)
-
-col1, col2 = st.columns([2, 1])
-with col1:
-    st.subheader("Parsed Order")
-    items = parse_order_items(order_text)
-    if items:
-        for item in items:
-            st.write(
-                f"- {item['qty']} x {item['name'].title()} ({item['unit']}) — ${item['qty'] * item['unit_price']:.2f}"
-            )
-    else:
-        st.warning("No recognized product items were parsed from the order text.")
-
-with col2:
-    st.subheader("Debug Info")
-    st.write(f"Name: {customer_name}")
-    st.write(f"Phone: {phone}")
-    st.write(f"Email: {email}")
-    st.write(f"ZIP: {zip_code}")
-    if not validate_zip(zip_code):
-        st.error("ZIP code must be exactly 5 digits.")
-
-if st.button("Calculate Summary"):
-    if not customer_name.strip():
-        st.error("Customer name is required.")
-    elif not phone.strip():
-        st.error("Phone number is required.")
-    elif not email.strip():
-        st.error("Email is required.")
-    elif not validate_zip(zip_code):
-        st.error("ZIP code must be exactly 5 digits.")
-    elif not items:
-        st.error("No valid order items parsed. Please update the order message.")
-    else:
-        summary = build_order_summary(items, zip_code)
-        st.success("Order summary generated successfully.")
-        st.code(format_order_summary(summary))
-        st.markdown(
-            "#### Payment Instructions\n"
-            f"Please collect **${summary['grand_total']:.2f}** via Zelle to **Malar Traders**."
-        )
-
-st.markdown("---")
-st.subheader("Product Catalog")
-st.code(render_product_catalog())
-
-st.markdown("---")
-st.subheader("Notes for testers")
-st.write(
-    "- Paste a customer message and verify that the correct products and quantities are parsed.\n"
-    "- Check the shipping fee for local CA zips, CA state zips, and other USA zips.\n"
-    "- This app is intended for testing the order capture and pricing logic independent of the LLM chat flow."
-)
-import os
-import re
-import json
-import streamlit as st # type: ignore
-from langchain_groq import ChatGroq 
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -266,11 +22,26 @@ st.title("🌸 The Indian Flowers USA")
 st.caption("Chat with Priya — your personal flower assistant")
 
 # ─────────────────────────────────────────────
-# 1. LLM SETUP — cached so it loads only once
+# 1. INSTALL PLAYWRIGHT BROWSERS (once)
+# ─────────────────────────────────────────────
+@st.cache_resource
+def install_playwright():
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True,
+            check=True
+        )
+    except Exception as e:
+        print(f"[Playwright install error]: {e}")
+
+install_playwright()
+
+# ─────────────────────────────────────────────
+# 2. LLM SETUP — cached so it loads only once
 # ─────────────────────────────────────────────
 @st.cache_resource
 def get_llms():
-    # Get API key from Streamlit secrets or environment variable
     groq_api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
     chat_llm = ChatGroq(
         model="llama-3.3-70b-versatile",
@@ -289,7 +60,7 @@ def get_llms():
 chat_llm, extract_llm = get_llms()
 
 # ─────────────────────────────────────────────
-# 2. KNOWLEDGE BASE — cached
+# 3. KNOWLEDGE BASE — live website via Playwright
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=3600)
 def load_knowledge() -> str:
@@ -302,69 +73,77 @@ def load_knowledge() -> str:
             page.wait_for_load_state("networkidle", timeout=30000)
             content = page.inner_text("body")
             browser.close()
-            return content[:5000]
+            if content and len(content.strip()) > 100:
+                return content[:6000]
+            else:
+                raise ValueError("Empty or too-short content from website")
     except Exception as e:
         print(f"[Playwright fetch error]: {e}")
         return (
             "The Indian Flowers USA (Malar Traders) delivers fresh Indian flowers "
-            "and garlands nationwide across the USA."
+            "and garlands nationwide across the USA. "
+            "Products include jasmine strings, mullai strings, rose petal garlands, "
+            "carnation garlands, wedding garlands, temple garlands, pooja garlands, "
+            "marigold garlands, veni, jadai, gajra, and loose flowers. "
+            "Shipping: Local $30, California $55, Nationwide $70. "
+            "Payment via Zelle to Malar Traders only."
         )
 
 WEBSITE_INFO = load_knowledge()
 
 # ─────────────────────────────────────────────
-# 3. PRODUCT CATALOG
+# 4. PRODUCT CATALOG
 # ─────────────────────────────────────────────
 PRODUCTS = {
-    "jasmine string":       {"price": 13.00,  "unit": "box (5 ft)"},
-    "jathimalli string":    {"price": 15.00,  "unit": "box (5 ft)"},
-    "mullai string":        {"price": 15.00,  "unit": "box (5 ft)"},
-    "kathambam string":     {"price": 15.00,  "unit": "box (5 ft)"},
-    "kanakambaram string":  {"price": 15.00,  "unit": "box (5 ft)"},
-    "neem flowers":         {"price": 10.00,  "unit": "100g"},
-    "jasmine flowers":      {"price": 10.00,  "unit": "100g"},
-    "mullai loose":         {"price": 10.00,  "unit": "100g"},
-    "kanakambaram":         {"price": 10.00,  "unit": "100g"},
-    "lilly loose":          {"price": 8.00,   "unit": "100g"},
-    "marigold loose":       {"price": 8.00,   "unit": "100g"},
-    "yellow rose":          {"price": 6.00,   "unit": "100g"},
-    "red rose":             {"price": 6.00,   "unit": "100g"},
-    "arali pink":           {"price": 6.00,   "unit": "100g"},
-    "arali red":            {"price": 6.00,   "unit": "100g"},
-    "lotus flowers":        {"price": 2.00,   "unit": "piece"},
-    "turmeric":             {"price": 8.00,   "unit": "each"},
-    "avarampoo":            {"price": 10.00,  "unit": "100g"},
-    "tulasi leaves":        {"price": 10.00,  "unit": "100g"},
-    "neem leaf":            {"price": 10.00,  "unit": "100g"},
-    "vilvam leaves":        {"price": 10.00,  "unit": "100g"},
-    "erukkam leaves":       {"price": 10.00,  "unit": "100g"},
-    "marikolunthu":         {"price": 10.00,  "unit": "100g"},
-    "maruvam":              {"price": 10.00,  "unit": "100g"},
-    "betel leaf":           {"price": 6.00,   "unit": "pack of 25"},
-    "mango leaf":           {"price": 2.00,   "unit": "pack of 10"},
-    "mango leaf thoranam":  {"price": 5.00,   "unit": "4 ft"},
-    "banana leaf":          {"price": 10.00,  "unit": "pack"},
-    "coconut thoranam":     {"price": 5.00,   "unit": "5 pieces"},
-    "ala mokku":            {"price": 10.00,  "unit": "pack"},
-    "marigold garland":     {"price": 20.00,  "unit": "per foot"},
-    "rose petal garland":   {"price": 100.00, "unit": "pair (4 ft total)"},
-    "carnation garland":    {"price": 100.00, "unit": "pair (4 ft total)"},
-    "lilly garland":        {"price": 100.00, "unit": "pair (4 ft total)"},
-    "lily garland":         {"price": 100.00, "unit": "pair (4 ft total)"},
-    "exchange garland":     {"price": 80.00,  "unit": "pair"},
-    "button rose garland":  {"price": 26.00,  "unit": "per foot (each side)"},
-    "wedding garland":      {"price": 100.00, "unit": "pair (4 ft total)"},
-    "north indian garland": {"price": 100.00, "unit": "pair"},
-    "door garland":         {"price": 130.00, "unit": "10 ft set"},
-    "house warming garland":{"price": 130.00, "unit": "10 ft set"},
-    "veni":                 {"price": 15.00,  "unit": "piece"},
-    "jadai":                {"price": 15.00,  "unit": "piece"},
-    "veni jadai":           {"price": 80.00,  "unit": "set"},
-    "gajra":                {"price": 80.00,  "unit": "set"},
-    "temple garland":       {"price": 26.00,  "unit": "per foot"},
-    "pooja garland":        {"price": 26.00,  "unit": "per foot"},
-    "vadamalli garland":    {"price": 26.00,  "unit": "per foot"},
-    "bouquet":              {"price": 8.00,   "unit": "piece"},
+    "jasmine string":        {"price": 13.00,  "unit": "box (5 ft)"},
+    "jathimalli string":     {"price": 15.00,  "unit": "box (5 ft)"},
+    "mullai string":         {"price": 15.00,  "unit": "box (5 ft)"},
+    "kathambam string":      {"price": 15.00,  "unit": "box (5 ft)"},
+    "kanakambaram string":   {"price": 15.00,  "unit": "box (5 ft)"},
+    "neem flowers":          {"price": 10.00,  "unit": "100g"},
+    "jasmine flowers":       {"price": 10.00,  "unit": "100g"},
+    "mullai loose":          {"price": 10.00,  "unit": "100g"},
+    "kanakambaram":          {"price": 10.00,  "unit": "100g"},
+    "lilly loose":           {"price": 8.00,   "unit": "100g"},
+    "marigold loose":        {"price": 8.00,   "unit": "100g"},
+    "yellow rose":           {"price": 6.00,   "unit": "100g"},
+    "red rose":              {"price": 6.00,   "unit": "100g"},
+    "arali pink":            {"price": 6.00,   "unit": "100g"},
+    "arali red":             {"price": 6.00,   "unit": "100g"},
+    "lotus flowers":         {"price": 2.00,   "unit": "piece"},
+    "turmeric":              {"price": 8.00,   "unit": "each"},
+    "avarampoo":             {"price": 10.00,  "unit": "100g"},
+    "tulasi leaves":         {"price": 10.00,  "unit": "100g"},
+    "neem leaf":             {"price": 10.00,  "unit": "100g"},
+    "vilvam leaves":         {"price": 10.00,  "unit": "100g"},
+    "erukkam leaves":        {"price": 10.00,  "unit": "100g"},
+    "marikolunthu":          {"price": 10.00,  "unit": "100g"},
+    "maruvam":               {"price": 10.00,  "unit": "100g"},
+    "betel leaf":            {"price": 6.00,   "unit": "pack of 25"},
+    "mango leaf":            {"price": 2.00,   "unit": "pack of 10"},
+    "mango leaf thoranam":   {"price": 5.00,   "unit": "4 ft"},
+    "banana leaf":           {"price": 10.00,  "unit": "pack"},
+    "coconut thoranam":      {"price": 5.00,   "unit": "5 pieces"},
+    "ala mokku":             {"price": 10.00,  "unit": "pack"},
+    "marigold garland":      {"price": 20.00,  "unit": "per foot"},
+    "rose petal garland":    {"price": 25.00,  "unit": "per foot (total both sides)"},
+    "carnation garland":     {"price": 25.00,  "unit": "per foot (total both sides)"},
+    "lilly garland":         {"price": 25.00,  "unit": "per foot (total both sides)"},
+    "lily garland":          {"price": 25.00,  "unit": "per foot (total both sides)"},
+    "exchange garland":      {"price": 80.00,  "unit": "pair"},
+    "button rose garland":   {"price": 26.00,  "unit": "per foot (each side)"},
+    "wedding garland":       {"price": 25.00,  "unit": "per foot (total both sides)"},
+    "north indian garland":  {"price": 100.00, "unit": "pair"},
+    "door garland":          {"price": 130.00, "unit": "10 ft set"},
+    "house warming garland": {"price": 130.00, "unit": "10 ft set"},
+    "veni":                  {"price": 15.00,  "unit": "piece"},
+    "jadai":                 {"price": 15.00,  "unit": "piece"},
+    "veni jadai":            {"price": 80.00,  "unit": "set"},
+    "gajra":                 {"price": 80.00,  "unit": "set"},
+    "temple garland":        {"price": 26.00,  "unit": "per foot"},
+    "pooja garland":         {"price": 26.00,  "unit": "per foot"},
+    "vadamalli garland":     {"price": 26.00,  "unit": "per foot"},
+    "bouquet":               {"price": 8.00,   "unit": "piece"},
 }
 
 PRODUCT_CATALOG_TEXT = "\n".join(
@@ -373,32 +152,32 @@ PRODUCT_CATALOG_TEXT = "\n".join(
 )
 
 ORDER_KEYWORDS = list(PRODUCTS.keys()) + [
-    "garland","string","flower","veni","jasmine","rose","carnation",
-    "lily","lilly","mullai","tulasi","pooja","temple","wedding","exchange",
-    "marigold","lotus","gajra","jadai","bouquet","door","housewarming",
+    "garland", "string", "flower", "veni", "jasmine", "rose", "carnation",
+    "lily", "lilly", "mullai", "tulasi", "pooja", "temple", "wedding", "exchange",
+    "marigold", "lotus", "gajra", "jadai", "bouquet", "door", "housewarming",
 ]
 
 SKIP_WORDS = {
-    "ok","yes","no","confirm","proceed","hello","hi","hey","thanks","thank",
-    "please","sure","great","good","need","want","order","get","i","me","my",
-    "the","and","for","a","an","is","it","in","to","of","can","do","what",
-    "box","boxes","piece","pieces","pair","pairs","bunch","bunches","set","sets",
+    "ok", "yes", "no", "confirm", "proceed", "hello", "hi", "hey", "thanks", "thank",
+    "please", "sure", "great", "good", "need", "want", "order", "get", "i", "me", "my",
+    "the", "and", "for", "a", "an", "is", "it", "in", "to", "of", "can", "do", "what",
+    "box", "boxes", "piece", "pieces", "pair", "pairs", "bunch", "bunches", "set", "sets",
 }
 
 # ─────────────────────────────────────────────
-# 4. SHIPPING CALCULATOR
+# 5. SHIPPING CALCULATOR
 # ─────────────────────────────────────────────
 LOCAL_ZIPS = {
-    "92335","92336","92337","92316","92324","92376","92377",
-    "91710","91761","91762","91763","91764","91766","91767","91768",
+    "92335", "92336", "92337", "92316", "92324", "92376", "92377",
+    "91710", "91761", "91762", "91763", "91764", "91766", "91767", "91768",
 }
 CA_PREFIXES = {
-    "900","901","902","903","904","905","906","907","908",
-    "910","911","912","913","914","915","916","917","918","919",
-    "920","921","922","923","924","925","926","927","928",
-    "930","931","932","933","934","935","936","937","938","939",
-    "940","941","942","943","944","945","946","947","948","949",
-    "950","951","952","953","954","955","956","957","958","959","960","961",
+    "900", "901", "902", "903", "904", "905", "906", "907", "908",
+    "910", "911", "912", "913", "914", "915", "916", "917", "918", "919",
+    "920", "921", "922", "923", "924", "925", "926", "927", "928",
+    "930", "931", "932", "933", "934", "935", "936", "937", "938", "939",
+    "940", "941", "942", "943", "944", "945", "946", "947", "948", "949",
+    "950", "951", "952", "953", "954", "955", "956", "957", "958", "959", "960", "961",
 }
 
 def calculate_shipping(zip_code: str, weight_lbs: float = 2.0) -> dict:
@@ -451,14 +230,14 @@ def format_order_summary(summary: dict) -> str:
             f"  • {item['qty']} x {item['name'].title()} "
             f"@ ${item['unit_price']:.2f}/{item['unit']} = ${item['qty'] * item['unit_price']:.2f}"
         )
-    lines.append(f"  Subtotal  : ${summary['subtotal']:.2f}")
-    lines.append(f"  Shipping  : ${summary['shipping']['fee']:.2f} ({summary['shipping']['method']})")
+    lines.append(f"  Subtotal   : ${summary['subtotal']:.2f}")
+    lines.append(f"  Shipping   : ${summary['shipping']['fee']:.2f} ({summary['shipping']['method']})")
     lines.append(f"  GRAND TOTAL: ${summary['grand_total']:.2f}")
     lines.append(f"  Delivery note: {summary['shipping']['note']}")
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────
-# 5. LEAD FIELDS
+# 6. LEAD FIELDS
 # ─────────────────────────────────────────────
 LEAD_FIELDS = ["name", "phone", "email", "zip_code"]
 LEAD_QUESTIONS = {
@@ -475,7 +254,7 @@ def next_missing_field(memory: dict):
     return None
 
 # ─────────────────────────────────────────────
-# 6. EXTRACTORS
+# 7. EXTRACTORS
 # ─────────────────────────────────────────────
 def regex_extract_lead(text: str, memory: dict) -> dict:
     updated = dict(memory)
@@ -519,14 +298,13 @@ def extract_order_intent(text: str, memory: dict) -> dict:
         existing = updated.get("raw_order_text") or ""
         updated["raw_order_text"] = (existing + " " + text).strip()
     if not updated.get("occasion"):
-        for occ in ["wedding","pooja","temple","birthday","engagement","festival","puja","housewarming"]:
+        for occ in ["wedding", "pooja", "temple", "birthday", "engagement", "festival", "puja", "housewarming"]:
             if occ in low:
                 updated["occasion"] = occ
                 break
     return updated
 
 def llm_extract_lead_sync(text: str, memory: dict) -> dict:
-    """Synchronous LLM extraction for Streamlit."""
     updated = dict(memory)
     try:
         prompt = ChatPromptTemplate.from_template(
@@ -540,16 +318,16 @@ Rules:
 - email: valid email only
 - zip_code: 5-digit US zip only"""
         )
-        chain  = prompt | extract_llm | StrOutputParser()
-        raw    = chain.invoke({"message": text})
-        raw    = re.sub(r"^```(?:json)?", "", raw.strip())
-        raw    = re.sub(r"```$", "", raw).strip()
-        m      = re.search(r'\{.*?\}', raw, re.DOTALL)
+        chain = prompt | extract_llm | StrOutputParser()
+        raw   = chain.invoke({"message": text})
+        raw   = re.sub(r"^```(?:json)?", "", raw.strip())
+        raw   = re.sub(r"```$", "", raw).strip()
+        m     = re.search(r'\{.*?\}', raw, re.DOTALL)
         if m:
             extracted = json.loads(m.group(0))
-            for field in ["name","phone","email","zip_code","occasion"]:
+            for field in ["name", "phone", "email", "zip_code", "occasion"]:
                 val = extracted.get(field)
-                if val and str(val).strip().lower() not in ("null","none",""):
+                if val and str(val).strip().lower() not in ("null", "none", ""):
                     if not updated.get(field):
                         updated[field] = str(val).strip()
     except Exception as e:
@@ -564,7 +342,7 @@ def smart_extract_lead(text: str, memory: dict) -> dict:
     return updated
 
 # ─────────────────────────────────────────────
-# 7. SYSTEM PROMPT & CHAIN
+# 8. SYSTEM PROMPT & CHAIN
 # ─────────────────────────────────────────────
 SYSTEM_PROMPT = f"""You are Priya, a warm sales assistant for The Indian Flowers USA (Malar Traders).
 
@@ -577,11 +355,18 @@ YOUR ROLE:
 - Ask ONE question at a time only
 - NEVER mention product codes
 
-ABOUT THE BUSINESS:
-{WEBSITE_INFO[:3000]}
+LIVE WEBSITE CONTENT (updated every hour):
+{WEBSITE_INFO[:4000]}
 
-PRODUCT CATALOG (reference only — use ORDER BREAKDOWN for final pricing):
+PRODUCT CATALOG WITH PRICING (use this for reference and answering price questions):
 {PRODUCT_CATALOG_TEXT}
+
+PRICING NOTES:
+- Rose petal / carnation / lilly / wedding garlands: $25 per foot (total length both sides combined)
+  Example: 4 ft total (2 ft each side) = $100. 5 ft total (2.5 ft each side) = $125.
+- Button rose garland: $26 per foot PER SIDE
+- Temple / pooja / vadamalli garland: $26 per foot
+- Marigold garland: $20 per foot
 
 SHIPPING RATES:
   - Local delivery (Fontana/Ontario CA, within 50 miles): $30.00
@@ -592,10 +377,10 @@ SHIPPING RATES:
 
 PAYMENT: Zelle to "Malar Traders" only.
 
-CRITICAL:
+CRITICAL RULES:
 - NEVER assume an order — always ask what the customer wants
 - NEVER show a price unless ORDER BREAKDOWN is in context
-- NEVER recalculate prices
+- NEVER recalculate prices from the ORDER BREAKDOWN
 - Keep replies SHORT and warm
 """
 
@@ -608,11 +393,11 @@ chat_prompt = ChatPromptTemplate.from_messages([
 conversation_chain = chat_prompt | chat_llm | StrOutputParser()
 
 # ─────────────────────────────────────────────
-# 8. ORDER SUMMARY HELPERS
+# 9. ORDER SUMMARY HELPERS
 # ─────────────────────────────────────────────
 def order_confirmation_text(memory: dict) -> str:
     summary = build_order_summary(memory["order_items"], memory["zip_code"])
-    memory["confirmed_summary"] = summary   # store so it's never recalculated
+    memory["confirmed_summary"] = summary
     name  = memory.get("name", "there")
     lines = [f"Here's your order summary, **{name}**! 🌺\n"]
     for item in summary["items"]:
@@ -629,7 +414,6 @@ def order_confirmation_text(memory: dict) -> str:
     return "\n".join(lines)
 
 def final_confirmation_text(memory: dict) -> str:
-    # Always use stored summary — never recalculate
     summary = memory.get("confirmed_summary") or build_order_summary(
         memory["order_items"], memory["zip_code"]
     )
@@ -665,7 +449,7 @@ def order_recap_text(memory: dict) -> str:
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────
-# 9. SESSION STATE INIT
+# 10. SESSION STATE INIT
 # ─────────────────────────────────────────────
 def init_session():
     if "memory" not in st.session_state:
@@ -694,19 +478,19 @@ def init_session():
 init_session()
 
 # ─────────────────────────────────────────────
-# 10. DISPLAY CHAT HISTORY
+# 11. DISPLAY CHAT HISTORY
 # ─────────────────────────────────────────────
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🌸" if msg["role"] == "assistant" else "👤"):
         st.markdown(msg["content"])
 
 # ─────────────────────────────────────────────
-# 11. HANDLE USER INPUT
+# 12. HANDLE USER INPUT
 # ─────────────────────────────────────────────
 CONFIRM_TRIGGERS = {
-    "confirm","yes confirm","proceed","confirm order","place order",
-    "proceed with payment","i confirm","yes proceed","go ahead",
-    "finalize","that's correct","looks good","looks correct","yes",
+    "confirm", "yes confirm", "proceed", "confirm order", "place order",
+    "proceed with payment", "i confirm", "yes proceed", "go ahead",
+    "finalize", "that's correct", "looks good", "looks correct", "yes",
 }
 
 if user_input := st.chat_input("Type your message here..."):
@@ -714,12 +498,11 @@ if user_input := st.chat_input("Type your message here..."):
     lowered = user_input.lower().strip()
     stage   = memory.get("stage", "lead_capture")
 
-    # Show user message
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
 
-    reply = None   # we'll set this, then display at the end
+    reply = None
 
     # ── STAGE 1: LEAD CAPTURE ──────────────────────────────────────────
     if stage == "lead_capture":
@@ -738,7 +521,7 @@ if user_input := st.chat_input("Type your message here..."):
                     reply = f"Thank you! {LEAD_QUESTIONS[next_field]}"
                 else:
                     memory["stage"] = "need_discovery"
-                    name  = memory.get("name", "there")
+                    name = memory.get("name", "there")
                     reply = (
                         f"Wonderful, {name}! 🌺 Thank you for your details.\n\n"
                         "What can I help you with today? Are you looking for wedding garlands, "
@@ -746,7 +529,7 @@ if user_input := st.chat_input("Type your message here..."):
                     )
         else:
             memory["stage"] = "need_discovery"
-            name  = memory.get("name", "there")
+            name = memory.get("name", "there")
             reply = (
                 f"Wonderful, {name}! 🌺 Thank you for your details.\n\n"
                 "What can I help you with today? Are you looking for wedding garlands, "
@@ -762,7 +545,6 @@ if user_input := st.chat_input("Type your message here..."):
                 memory["zip_code"] = m.group(1)
         if memory.get("raw_order_text") or memory.get("occasion"):
             memory["stage"] = "order_building"
-        # Fall through to LLM
 
     # ── STAGE 3: ORDER BUILDING ────────────────────────────────────────
     if stage in ("order_building", "need_discovery") and reply is None:
@@ -773,7 +555,6 @@ if user_input := st.chat_input("Type your message here..."):
                 if items:
                     memory["order_items"] = items
 
-        # Check confirm trigger
         if any(t in lowered for t in CONFIRM_TRIGGERS) and stage == "order_building":
             if memory.get("order_items") and memory.get("zip_code"):
                 memory["stage"] = "order_confirm"
@@ -789,7 +570,7 @@ if user_input := st.chat_input("Type your message here..."):
             memory["stage"]           = "order_done"
             memory["order_confirmed"] = True
             reply = final_confirmation_text(memory)
-        elif any(t in lowered for t in ["no","change","wrong","different","edit","modify"]):
+        elif any(t in lowered for t in ["no", "change", "wrong", "different", "edit", "modify"]):
             memory["stage"]          = "order_building"
             memory["order_items"]    = []
             memory["raw_order_text"] = None
@@ -797,17 +578,17 @@ if user_input := st.chat_input("Type your message here..."):
 
     # ── STAGE 5: ORDER DONE ────────────────────────────────────────────
     elif stage == "order_done" and reply is None:
-        price_words = {"price","pricing","total","cost","how much","amount","summary","breakdown"}
+        price_words = {"price", "pricing", "total", "cost", "how much", "amount", "summary", "breakdown"}
         if any(w in lowered for w in price_words):
             reply = order_recap_text(memory)
         else:
             reply = (
-                f"Your order is confirmed, {memory.get('name','there')}! 🌺 "
+                f"Your order is confirmed, {memory.get('name', 'there')}! 🌺 "
                 "Please send payment via Zelle to **Malar Traders**. "
                 "Is there anything else I can help you with?"
             )
 
-    # ── LLM RESPONSE (need_discovery / order_building) ─────────────────
+    # ── LLM RESPONSE ───────────────────────────────────────────────────
     if reply is None:
         context_parts = [
             f"=== CUSTOMER INFO ===",
@@ -845,25 +626,18 @@ if user_input := st.chat_input("Type your message here..."):
                     })
                     reply = response
                 except Exception as e:
-                    err = str(e).lower()
-                    if "connect" in err or "refused" in err:
-                        reply = "⚠️ Cannot reach Ollama. Please run `ollama serve` and try again."
-                    else:
-                        reply = f"⚠️ {str(e)}"
-                        print(f"[Chain error]: {e}")
+                    reply = f"⚠️ {str(e)}"
+                    print(f"[Chain error]: {e}")
             st.markdown(reply)
 
-        # Update LangChain history
         st.session_state.lc_history.append(HumanMessage(content=user_input))
         st.session_state.lc_history.append(AIMessage(content=reply))
         if len(st.session_state.lc_history) > 20:
             st.session_state.lc_history = st.session_state.lc_history[-20:]
 
     else:
-        # Hardcoded reply (lead capture / order confirm stages)
         with st.chat_message("assistant", avatar="🌸"):
             st.markdown(reply)
 
-    # Save message + memory
     st.session_state.messages.append({"role": "assistant", "content": reply})
     st.session_state.memory = memory
