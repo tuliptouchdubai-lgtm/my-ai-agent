@@ -239,4 +239,626 @@ st.write(
     "- Paste a customer message and verify that the correct products and quantities are parsed.\n"
     "- Check the shipping fee for local CA zips, CA state zips, and other USA zips.\n"
     "- This app is intended for testing the order capture and pricing logic independent of the LLM chat flow."
+)import os
+import re
+import json
+import streamlit as st # type: ignore
+from langchain_groq import ChatGroq # type: ignore
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.output_parsers import StrOutputParser
+
+# ─────────────────────────────────────────────
+# PAGE CONFIG
+# ─────────────────────────────────────────────
+st.set_page_config(
+    page_title="The Indian Flowers USA",
+    page_icon="🌸",
+    layout="centered"
 )
+
+st.title("🌸 The Indian Flowers USA")
+st.caption("Chat with Priya — your personal flower assistant")
+
+# ─────────────────────────────────────────────
+# 1. LLM SETUP — cached so it loads only once
+# ─────────────────────────────────────────────
+@st.cache_resource
+def get_llms():
+    # Get API key from Streamlit secrets or environment variable
+    groq_api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+    chat_llm = ChatGroq(
+        model="llama3-8b-8192",   # free & fast on Groq
+        temperature=0.2,
+        max_tokens=400,
+        groq_api_key=groq_api_key,
+    )
+    extract_llm = ChatGroq(
+        model="llama3-8b-8192",
+        temperature=0.0,
+        max_tokens=200,
+        groq_api_key=groq_api_key,
+    )
+    return chat_llm, extract_llm
+
+chat_llm, extract_llm = get_llms()
+
+# ─────────────────────────────────────────────
+# 2. KNOWLEDGE BASE — cached
+# ─────────────────────────────────────────────
+import requests
+from bs4 import BeautifulSoup
+
+@st.cache_data(ttl=3600)
+def load_knowledge() -> str:
+    try:
+        response = requests.get("https://theindianflowers.com/", timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        return text[:5000]
+    except Exception as e:
+        print(f"[Website fetch error]: {e}")
+        return (
+            "The Indian Flowers USA (Malar Traders) delivers fresh Indian flowers "
+            "and garlands nationwide across the USA."
+        )
+
+WEBSITE_INFO = load_knowledge()
+
+# ─────────────────────────────────────────────
+# 3. PRODUCT CATALOG
+# ─────────────────────────────────────────────
+PRODUCTS = {
+    "jasmine string":       {"price": 13.00,  "unit": "box (5 ft)"},
+    "jathimalli string":    {"price": 15.00,  "unit": "box (5 ft)"},
+    "mullai string":        {"price": 15.00,  "unit": "box (5 ft)"},
+    "kathambam string":     {"price": 15.00,  "unit": "box (5 ft)"},
+    "kanakambaram string":  {"price": 15.00,  "unit": "box (5 ft)"},
+    "neem flowers":         {"price": 10.00,  "unit": "100g"},
+    "jasmine flowers":      {"price": 10.00,  "unit": "100g"},
+    "mullai loose":         {"price": 10.00,  "unit": "100g"},
+    "kanakambaram":         {"price": 10.00,  "unit": "100g"},
+    "lilly loose":          {"price": 8.00,   "unit": "100g"},
+    "marigold loose":       {"price": 8.00,   "unit": "100g"},
+    "yellow rose":          {"price": 6.00,   "unit": "100g"},
+    "red rose":             {"price": 6.00,   "unit": "100g"},
+    "arali pink":           {"price": 6.00,   "unit": "100g"},
+    "arali red":            {"price": 6.00,   "unit": "100g"},
+    "lotus flowers":        {"price": 2.00,   "unit": "piece"},
+    "turmeric":             {"price": 8.00,   "unit": "each"},
+    "avarampoo":            {"price": 10.00,  "unit": "100g"},
+    "tulasi leaves":        {"price": 10.00,  "unit": "100g"},
+    "neem leaf":            {"price": 10.00,  "unit": "100g"},
+    "vilvam leaves":        {"price": 10.00,  "unit": "100g"},
+    "erukkam leaves":       {"price": 10.00,  "unit": "100g"},
+    "marikolunthu":         {"price": 10.00,  "unit": "100g"},
+    "maruvam":              {"price": 10.00,  "unit": "100g"},
+    "betel leaf":           {"price": 6.00,   "unit": "pack of 25"},
+    "mango leaf":           {"price": 2.00,   "unit": "pack of 10"},
+    "mango leaf thoranam":  {"price": 5.00,   "unit": "4 ft"},
+    "banana leaf":          {"price": 10.00,  "unit": "pack"},
+    "coconut thoranam":     {"price": 5.00,   "unit": "5 pieces"},
+    "ala mokku":            {"price": 10.00,  "unit": "pack"},
+    "marigold garland":     {"price": 20.00,  "unit": "per foot"},
+    "rose petal garland":   {"price": 100.00, "unit": "pair (4 ft total)"},
+    "carnation garland":    {"price": 100.00, "unit": "pair (4 ft total)"},
+    "lilly garland":        {"price": 100.00, "unit": "pair (4 ft total)"},
+    "lily garland":         {"price": 100.00, "unit": "pair (4 ft total)"},
+    "exchange garland":     {"price": 80.00,  "unit": "pair"},
+    "button rose garland":  {"price": 26.00,  "unit": "per foot (each side)"},
+    "wedding garland":      {"price": 100.00, "unit": "pair (4 ft total)"},
+    "north indian garland": {"price": 100.00, "unit": "pair"},
+    "door garland":         {"price": 130.00, "unit": "10 ft set"},
+    "house warming garland":{"price": 130.00, "unit": "10 ft set"},
+    "veni":                 {"price": 15.00,  "unit": "piece"},
+    "jadai":                {"price": 15.00,  "unit": "piece"},
+    "veni jadai":           {"price": 80.00,  "unit": "set"},
+    "gajra":                {"price": 80.00,  "unit": "set"},
+    "temple garland":       {"price": 26.00,  "unit": "per foot"},
+    "pooja garland":        {"price": 26.00,  "unit": "per foot"},
+    "vadamalli garland":    {"price": 26.00,  "unit": "per foot"},
+    "bouquet":              {"price": 8.00,   "unit": "piece"},
+}
+
+PRODUCT_CATALOG_TEXT = "\n".join(
+    f"  - {name.title()}: ${v['price']:.2f} per {v['unit']}"
+    for name, v in PRODUCTS.items()
+)
+
+ORDER_KEYWORDS = list(PRODUCTS.keys()) + [
+    "garland","string","flower","veni","jasmine","rose","carnation",
+    "lily","lilly","mullai","tulasi","pooja","temple","wedding","exchange",
+    "marigold","lotus","gajra","jadai","bouquet","door","housewarming",
+]
+
+SKIP_WORDS = {
+    "ok","yes","no","confirm","proceed","hello","hi","hey","thanks","thank",
+    "please","sure","great","good","need","want","order","get","i","me","my",
+    "the","and","for","a","an","is","it","in","to","of","can","do","what",
+    "box","boxes","piece","pieces","pair","pairs","bunch","bunches","set","sets",
+}
+
+# ─────────────────────────────────────────────
+# 4. SHIPPING CALCULATOR
+# ─────────────────────────────────────────────
+LOCAL_ZIPS = {
+    "92335","92336","92337","92316","92324","92376","92377",
+    "91710","91761","91762","91763","91764","91766","91767","91768",
+}
+CA_PREFIXES = {
+    "900","901","902","903","904","905","906","907","908",
+    "910","911","912","913","914","915","916","917","918","919",
+    "920","921","922","923","924","925","926","927","928",
+    "930","931","932","933","934","935","936","937","938","939",
+    "940","941","942","943","944","945","946","947","948","949",
+    "950","951","952","953","954","955","956","957","958","959","960","961",
+}
+
+def calculate_shipping(zip_code: str, weight_lbs: float = 2.0) -> dict:
+    z = zip_code.strip()
+    if z in LOCAL_ZIPS:
+        return {"fee": 30.00, "method": "Local Delivery (within 50 miles)",
+                "note": "Delivered fresh same/next day."}
+    if len(z) >= 3 and z[:3] in CA_PREFIXES:
+        return {"fee": 55.00, "method": "California State Shipping",
+                "note": "Delivered in 1-2 business days."}
+    if weight_lbs > 15:
+        return {"fee": 0.00, "method": "Southwest Cargo (Bulk Order)",
+                "note": "Rate quoted separately."}
+    return {"fee": 70.00, "method": "Nationwide USA Shipping",
+            "note": "Delivered in 2-3 business days via overnight cold-pack."}
+
+def parse_order_items(text: str) -> list:
+    found, seen = [], set()
+    low = text.lower()
+    for name, info in PRODUCTS.items():
+        if name in low and name not in seen:
+            match = re.search(
+                r'(\d+(?:\.\d+)?)\s*(?:feet|ft|foot|box(?:es)?|piece[s]?|pair[s]?|bunch(?:es)?|set[s]?)?\s*(?:of\s*)?' + re.escape(name),
+                low
+            )
+            if not match:
+                match = re.search(r'(\d+(?:\.\d+)?)\s*' + re.escape(name), low)
+            qty = float(match.group(1)) if match else 1.0
+            found.append({
+                "name":       name,
+                "qty":        qty,
+                "unit_price": info["price"],
+                "unit":       info["unit"],
+            })
+            seen.add(name)
+    return found
+
+def build_order_summary(items: list, zip_code: str) -> dict:
+    subtotal    = sum(i["qty"] * i["unit_price"] for i in items)
+    weight      = len(items) * 1.5
+    shipping    = calculate_shipping(zip_code, weight)
+    grand_total = subtotal + shipping["fee"]
+    return {"items": items, "subtotal": subtotal,
+            "shipping": shipping, "grand_total": grand_total}
+
+def format_order_summary(summary: dict) -> str:
+    lines = ["📦 ORDER BREAKDOWN (use EXACT these numbers):"]
+    for item in summary["items"]:
+        lines.append(
+            f"  • {item['qty']} x {item['name'].title()} "
+            f"@ ${item['unit_price']:.2f}/{item['unit']} = ${item['qty'] * item['unit_price']:.2f}"
+        )
+    lines.append(f"  Subtotal  : ${summary['subtotal']:.2f}")
+    lines.append(f"  Shipping  : ${summary['shipping']['fee']:.2f} ({summary['shipping']['method']})")
+    lines.append(f"  GRAND TOTAL: ${summary['grand_total']:.2f}")
+    lines.append(f"  Delivery note: {summary['shipping']['note']}")
+    return "\n".join(lines)
+
+# ─────────────────────────────────────────────
+# 5. LEAD FIELDS
+# ─────────────────────────────────────────────
+LEAD_FIELDS = ["name", "phone", "email", "zip_code"]
+LEAD_QUESTIONS = {
+    "name":     "May I have your full name please? 😊",
+    "phone":    "Thank you! Could you share your phone number?",
+    "email":    "Got it! What's your email address for order updates?",
+    "zip_code": "Almost there! What's your delivery ZIP code so I can calculate shipping?",
+}
+
+def next_missing_field(memory: dict):
+    for f in LEAD_FIELDS:
+        if not memory.get(f):
+            return f
+    return None
+
+# ─────────────────────────────────────────────
+# 6. EXTRACTORS
+# ─────────────────────────────────────────────
+def regex_extract_lead(text: str, memory: dict) -> dict:
+    updated = dict(memory)
+    low = text.lower().strip()
+    if not updated.get("email"):
+        m = re.search(r'[\w.\-+]+@[\w\-]+\.[a-z]{2,}', text, re.IGNORECASE)
+        if m:
+            updated["email"] = m.group(0).lower()
+    if not updated.get("phone"):
+        digits = re.sub(r'\D', '', text)
+        if len(digits) == 10:
+            updated["phone"] = digits
+        elif len(digits) == 11 and digits[0] == '1':
+            updated["phone"] = digits[1:]
+    if not updated.get("zip_code"):
+        m = re.search(r'\b(\d{5})\b', text)
+        if m:
+            updated["zip_code"] = m.group(1)
+    if not updated.get("name"):
+        m = re.search(
+            r'(?:my name is|i am|i\'m|this is|call me)\s+([A-Za-z ]{2,30})',
+            text, re.IGNORECASE
+        )
+        if m:
+            candidate = m.group(1).strip().rstrip(".,!?")
+            if candidate.lower() not in SKIP_WORDS:
+                updated["name"] = candidate.title()
+        else:
+            words = low.split()
+            if (len(words) <= 3
+                    and not re.search(r'\d', text)
+                    and not any(w in SKIP_WORDS for w in words)
+                    and not any(kw in low for kw in ORDER_KEYWORDS)):
+                updated["name"] = text.strip().title()
+    return updated
+
+def extract_order_intent(text: str, memory: dict) -> dict:
+    updated = dict(memory)
+    low = text.lower()
+    if any(kw in low for kw in ORDER_KEYWORDS):
+        existing = updated.get("raw_order_text") or ""
+        updated["raw_order_text"] = (existing + " " + text).strip()
+    if not updated.get("occasion"):
+        for occ in ["wedding","pooja","temple","birthday","engagement","festival","puja","housewarming"]:
+            if occ in low:
+                updated["occasion"] = occ
+                break
+    return updated
+
+def llm_extract_lead_sync(text: str, memory: dict) -> dict:
+    """Synchronous LLM extraction for Streamlit."""
+    updated = dict(memory)
+    try:
+        prompt = ChatPromptTemplate.from_template(
+            """Extract customer info from this message. Reply ONLY with valid JSON, no explanation.
+Message: "{message}"
+Return exactly this JSON (null if not found):
+{{"name": null, "phone": null, "email": null, "zip_code": null, "occasion": null}}
+Rules:
+- name: real person name only, never: ok/yes/no/confirm/hello/hi/thanks
+- phone: 10-digit US number as plain digits
+- email: valid email only
+- zip_code: 5-digit US zip only"""
+        )
+        chain  = prompt | extract_llm | StrOutputParser()
+        raw    = chain.invoke({"message": text})
+        raw    = re.sub(r"^```(?:json)?", "", raw.strip())
+        raw    = re.sub(r"```$", "", raw).strip()
+        m      = re.search(r'\{.*?\}', raw, re.DOTALL)
+        if m:
+            extracted = json.loads(m.group(0))
+            for field in ["name","phone","email","zip_code","occasion"]:
+                val = extracted.get(field)
+                if val and str(val).strip().lower() not in ("null","none",""):
+                    if not updated.get(field):
+                        updated[field] = str(val).strip()
+    except Exception as e:
+        print(f"[LLM extract error]: {e}")
+    return updated
+
+def smart_extract_lead(text: str, memory: dict) -> dict:
+    updated = regex_extract_lead(text, memory)
+    missing = [f for f in LEAD_FIELDS if not updated.get(f)]
+    if missing:
+        updated = llm_extract_lead_sync(text, updated)
+    return updated
+
+# ─────────────────────────────────────────────
+# 7. SYSTEM PROMPT & CHAIN
+# ─────────────────────────────────────────────
+SYSTEM_PROMPT = f"""You are Priya, a warm sales assistant for The Indian Flowers USA (Malar Traders).
+
+YOUR ROLE:
+- Help customers find the right flowers/garlands for their occasion
+- Ask about their needs, occasion, and preferences warmly
+- Present prices EXACTLY as given in the ORDER BREAKDOWN block — NEVER recalculate
+- Keep replies SHORT — 2 to 4 sentences max
+- Use the customer's name warmly
+- Ask ONE question at a time only
+- NEVER mention product codes
+
+ABOUT THE BUSINESS:
+{WEBSITE_INFO[:3000]}
+
+PRODUCT CATALOG (reference only — use ORDER BREAKDOWN for final pricing):
+{PRODUCT_CATALOG_TEXT}
+
+SHIPPING RATES:
+  - Local delivery (Fontana/Ontario CA, within 50 miles): $30.00
+  - California state: $55.00
+  - Nationwide USA: $70.00
+  - Bulk over 15 lbs: Southwest Cargo (quoted separately)
+  - NO local pickup — all orders shipped
+
+PAYMENT: Zelle to "Malar Traders" only.
+
+CRITICAL:
+- NEVER assume an order — always ask what the customer wants
+- NEVER show a price unless ORDER BREAKDOWN is in context
+- NEVER recalculate prices
+- Keep replies SHORT and warm
+"""
+
+chat_prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder(variable_name="history"),
+    ("human", "{input}"),
+])
+
+conversation_chain = chat_prompt | chat_llm | StrOutputParser()
+
+# ─────────────────────────────────────────────
+# 8. ORDER SUMMARY HELPERS
+# ─────────────────────────────────────────────
+def order_confirmation_text(memory: dict) -> str:
+    summary = build_order_summary(memory["order_items"], memory["zip_code"])
+    memory["confirmed_summary"] = summary   # store so it's never recalculated
+    name  = memory.get("name", "there")
+    lines = [f"Here's your order summary, **{name}**! 🌺\n"]
+    for item in summary["items"]:
+        lines.append(
+            f"• {item['qty']} x {item['name'].title()} ({item['unit']}) "
+            f"— **${item['qty'] * item['unit_price']:.2f}**"
+        )
+    lines.append(f"\n**Subtotal:** ${summary['subtotal']:.2f}")
+    lines.append(f"**Shipping ({summary['shipping']['method']}):** ${summary['shipping']['fee']:.2f}")
+    lines.append(f"**────────────────────────────**")
+    lines.append(f"🧾 **Grand Total: ${summary['grand_total']:.2f}**")
+    lines.append(f"\n_{summary['shipping']['note']}_")
+    lines.append(f"\nType **confirm** to place your order, or **change** to modify. 😊")
+    return "\n".join(lines)
+
+def final_confirmation_text(memory: dict) -> str:
+    # Always use stored summary — never recalculate
+    summary = memory.get("confirmed_summary") or build_order_summary(
+        memory["order_items"], memory["zip_code"]
+    )
+    name  = memory.get("name", "there")
+    lines = [f"🎉 **Thank you, {name}! Your order is confirmed.**\n"]
+    for item in summary["items"]:
+        lines.append(
+            f"• {item['qty']} x {item['name'].title()} "
+            f"— **${item['qty'] * item['unit_price']:.2f}**"
+        )
+    lines.append(f"\n**Shipping ({summary['shipping']['method']}):** ${summary['shipping']['fee']:.2f}")
+    lines.append(f"**Grand Total: ${summary['grand_total']:.2f}**")
+    lines.append(f"\n💳 Please send **${summary['grand_total']:.2f}** via **Zelle to Malar Traders**.")
+    lines.append("\n✅ Our team will send your receipt and delivery update shortly. Wishing you a beautiful celebration! 🌺")
+    return "\n".join(lines)
+
+def order_recap_text(memory: dict) -> str:
+    summary = memory.get("confirmed_summary")
+    if not summary:
+        return "I don't have a confirmed order on file yet."
+    name  = memory.get("name", "there")
+    lines = [f"Here's your confirmed order recap, **{name}**! 🌺\n"]
+    for item in summary["items"]:
+        lines.append(
+            f"• {item['qty']} x {item['name'].title()} ({item['unit']}) "
+            f"— **${item['qty'] * item['unit_price']:.2f}**"
+        )
+    lines.append(f"\n**Subtotal:** ${summary['subtotal']:.2f}")
+    lines.append(f"**Shipping ({summary['shipping']['method']}):** ${summary['shipping']['fee']:.2f}")
+    lines.append(f"**────────────────────────────**")
+    lines.append(f"🧾 **Grand Total: ${summary['grand_total']:.2f}**")
+    lines.append(f"\n💳 Please send **${summary['grand_total']:.2f}** via **Zelle to Malar Traders**.")
+    return "\n".join(lines)
+
+# ─────────────────────────────────────────────
+# 9. SESSION STATE INIT
+# ─────────────────────────────────────────────
+def init_session():
+    if "memory" not in st.session_state:
+        st.session_state.memory = {
+            "name": None, "phone": None, "email": None, "zip_code": None,
+            "occasion": None, "raw_order_text": None, "order_items": [],
+            "stage": "lead_capture", "order_confirmed": False,
+            "confirmed_summary": None,
+        }
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {
+                "role": "assistant",
+                "content": (
+                    "🌸 Welcome to **The Indian Flowers USA**!\n\n"
+                    "I'm Priya, your personal flower assistant. "
+                    "We deliver fresh jasmine, rose, carnation garlands and more "
+                    "to your doorstep anywhere in the USA.\n\n"
+                    "May I have your **full name** to get started? 😊"
+                )
+            }
+        ]
+    if "lc_history" not in st.session_state:
+        st.session_state.lc_history = []
+
+init_session()
+
+# ─────────────────────────────────────────────
+# 10. DISPLAY CHAT HISTORY
+# ─────────────────────────────────────────────
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"], avatar="🌸" if msg["role"] == "assistant" else "👤"):
+        st.markdown(msg["content"])
+
+# ─────────────────────────────────────────────
+# 11. HANDLE USER INPUT
+# ─────────────────────────────────────────────
+CONFIRM_TRIGGERS = {
+    "confirm","yes confirm","proceed","confirm order","place order",
+    "proceed with payment","i confirm","yes proceed","go ahead",
+    "finalize","that's correct","looks good","looks correct","yes",
+}
+
+if user_input := st.chat_input("Type your message here..."):
+    memory  = st.session_state.memory
+    lowered = user_input.lower().strip()
+    stage   = memory.get("stage", "lead_capture")
+
+    # Show user message
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(user_input)
+
+    reply = None   # we'll set this, then display at the end
+
+    # ── STAGE 1: LEAD CAPTURE ──────────────────────────────────────────
+    if stage == "lead_capture":
+        memory = smart_extract_lead(user_input, memory)
+        missing = next_missing_field(memory)
+        if missing:
+            just_provided = memory.get(missing)
+            if not just_provided:
+                if missing == "name" and any(kw in lowered for kw in ORDER_KEYWORDS):
+                    reply = f"🌸 We'd love to help with your order! First, {LEAD_QUESTIONS['name']}"
+                else:
+                    reply = LEAD_QUESTIONS[missing]
+            else:
+                next_field = next_missing_field(memory)
+                if next_field:
+                    reply = f"Thank you! {LEAD_QUESTIONS[next_field]}"
+                else:
+                    memory["stage"] = "need_discovery"
+                    name  = memory.get("name", "there")
+                    reply = (
+                        f"Wonderful, {name}! 🌺 Thank you for your details.\n\n"
+                        "What can I help you with today? Are you looking for wedding garlands, "
+                        "temple flowers, jasmine strings, or something else? And what's the occasion? 😊"
+                    )
+        else:
+            memory["stage"] = "need_discovery"
+            name  = memory.get("name", "there")
+            reply = (
+                f"Wonderful, {name}! 🌺 Thank you for your details.\n\n"
+                "What can I help you with today? Are you looking for wedding garlands, "
+                "temple flowers, jasmine strings, or something else? And what's the occasion? 😊"
+            )
+
+    # ── STAGE 2: NEED DISCOVERY ────────────────────────────────────────
+    elif stage == "need_discovery":
+        memory = extract_order_intent(user_input, memory)
+        if not memory.get("zip_code"):
+            m = re.search(r'\b(\d{5})\b', user_input)
+            if m:
+                memory["zip_code"] = m.group(1)
+        if memory.get("raw_order_text") or memory.get("occasion"):
+            memory["stage"] = "order_building"
+        # Fall through to LLM
+
+    # ── STAGE 3: ORDER BUILDING ────────────────────────────────────────
+    if stage in ("order_building", "need_discovery") and reply is None:
+        if stage == "order_building":
+            memory = extract_order_intent(user_input, memory)
+            if memory.get("raw_order_text"):
+                items = parse_order_items(memory["raw_order_text"])
+                if items:
+                    memory["order_items"] = items
+
+        # Check confirm trigger
+        if any(t in lowered for t in CONFIRM_TRIGGERS) and stage == "order_building":
+            if memory.get("order_items") and memory.get("zip_code"):
+                memory["stage"] = "order_confirm"
+                reply = order_confirmation_text(memory)
+            elif not memory.get("zip_code"):
+                reply = "I need your delivery ZIP code to calculate shipping. What's your ZIP? 📦"
+            else:
+                reply = "I don't have your order details yet. What would you like to order? 🌸"
+
+    # ── STAGE 4: ORDER CONFIRM ─────────────────────────────────────────
+    elif stage == "order_confirm" and reply is None:
+        if any(t in lowered for t in CONFIRM_TRIGGERS):
+            memory["stage"]           = "order_done"
+            memory["order_confirmed"] = True
+            reply = final_confirmation_text(memory)
+        elif any(t in lowered for t in ["no","change","wrong","different","edit","modify"]):
+            memory["stage"]          = "order_building"
+            memory["order_items"]    = []
+            memory["raw_order_text"] = None
+            reply = "No problem! Let's update your order. What would you like to change? 😊"
+
+    # ── STAGE 5: ORDER DONE ────────────────────────────────────────────
+    elif stage == "order_done" and reply is None:
+        price_words = {"price","pricing","total","cost","how much","amount","summary","breakdown"}
+        if any(w in lowered for w in price_words):
+            reply = order_recap_text(memory)
+        else:
+            reply = (
+                f"Your order is confirmed, {memory.get('name','there')}! 🌺 "
+                "Please send payment via Zelle to **Malar Traders**. "
+                "Is there anything else I can help you with?"
+            )
+
+    # ── LLM RESPONSE (need_discovery / order_building) ─────────────────
+    if reply is None:
+        context_parts = [
+            f"=== CUSTOMER INFO ===",
+            f"Name    : {memory.get('name')}",
+            f"Phone   : {memory.get('phone')}",
+            f"Email   : {memory.get('email')}",
+            f"ZIP     : {memory.get('zip_code')}",
+            f"Stage   : {memory.get('stage')}",
+        ]
+        if memory.get("occasion"):
+            context_parts.append(f"Occasion: {memory['occasion']}")
+        if memory.get("raw_order_text"):
+            context_parts.append(f"Order so far: \"{memory['raw_order_text']}\"")
+        if memory.get("order_items") and memory.get("zip_code"):
+            summary = build_order_summary(memory["order_items"], memory["zip_code"])
+            context_parts.append("\n" + format_order_summary(summary))
+            context_parts.append(
+                "\nINSTRUCTION: Present the ORDER BREAKDOWN above and ask customer to type 'confirm'."
+            )
+        else:
+            context_parts.append(
+                "\nINSTRUCTION: Ask warmly what flowers/garlands they need and for what occasion. "
+                "Get specifics: product type, quantity, size. "
+                "Once you understand the order, ask them to say 'confirm'."
+            )
+
+        augmented_input = "\n".join(context_parts) + f"\n\n---\nCustomer: {user_input}"
+
+        with st.chat_message("assistant", avatar="🌸"):
+            with st.spinner("Priya is thinking..."):
+                try:
+                    response = conversation_chain.invoke({
+                        "history": st.session_state.lc_history,
+                        "input":   augmented_input,
+                    })
+                    reply = response
+                except Exception as e:
+                    err = str(e).lower()
+                    if "connect" in err or "refused" in err:
+                        reply = "⚠️ Cannot reach Ollama. Please run `ollama serve` and try again."
+                    else:
+                        reply = "I had a hiccup — please try again! 🙏"
+                        print(f"[Chain error]: {e}")
+            st.markdown(reply)
+
+        # Update LangChain history
+        st.session_state.lc_history.append(HumanMessage(content=user_input))
+        st.session_state.lc_history.append(AIMessage(content=reply))
+        if len(st.session_state.lc_history) > 20:
+            st.session_state.lc_history = st.session_state.lc_history[-20:]
+
+    else:
+        # Hardcoded reply (lead capture / order confirm stages)
+        with st.chat_message("assistant", avatar="🌸"):
+            st.markdown(reply)
+
+    # Save message + memory
+    st.session_state.messages.append({"role": "assistant", "content": reply})
+    st.session_state.memory = memory
