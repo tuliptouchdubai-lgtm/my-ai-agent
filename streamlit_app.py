@@ -273,13 +273,13 @@ def get_llms():
     # Get API key from Streamlit secrets or environment variable
     groq_api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
     chat_llm = ChatGroq(
-        model="llama3-8b-8192",   # free & fast on Groq
+        model="llama-3.3-70b-versatile",
         temperature=0.2,
         max_tokens=400,
         groq_api_key=groq_api_key,
     )
     extract_llm = ChatGroq(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         temperature=0.0,
         max_tokens=200,
         groq_api_key=groq_api_key,
