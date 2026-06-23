@@ -277,6 +277,15 @@ WEBSITE_INFO, PRODUCTS = load_knowledge_and_products()
 # Sidebar: show source
 st.sidebar.success(f"✅ Live prices loaded from indian-flowers.com ({len(PRODUCTS)} products)")
 
+# ── Email helper functions (defined early for sidebar use) ──
+def get_today_str() -> str:
+    return datetime.datetime.now().strftime("%B %d, %Y")
+
+def get_current_hour_et() -> int:
+    utc_now = datetime.datetime.utcnow()
+    et_now = utc_now - datetime.timedelta(hours=4)
+    return et_now.hour
+
 # Sidebar: daily summary email
 st.sidebar.divider()
 st.sidebar.subheader("📧 Daily Order Summary")
@@ -605,16 +614,6 @@ def order_recap_text(memory: dict) -> str:
 # ─────────────────────────────────────────────
 # 10. DAILY EMAIL SUMMARY
 # ─────────────────────────────────────────────
-
-def get_today_str() -> str:
-    return datetime.datetime.now().strftime("%B %d, %Y")
-
-def get_current_hour_et() -> int:
-    """Return current hour in US Eastern time (UTC-4 or UTC-5)."""
-    utc_now = datetime.datetime.utcnow()
-    # EST = UTC-5, EDT = UTC-4 (approximate: use UTC-4 for simplicity)
-    et_now = utc_now - datetime.timedelta(hours=4)
-    return et_now.hour
 
 def build_email_html(chat_orders: list) -> str:
     """Build a nicely formatted HTML email with all confirmed chat orders for today."""
