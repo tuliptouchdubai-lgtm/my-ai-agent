@@ -60,41 +60,93 @@ def get_llms():
 chat_llm, extract_llm = get_llms()
 
 # ─────────────────────────────────────────────
-# 3. KNOWLEDGE BASE — live website via Playwright
+# 3. SCRAPER HELPER — fetch one category page
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=3600)
-def load_knowledge() -> str:
+def scrape_category(page, url: str) -> list[dict]:
+    """
+    Visit a WooCommerce category page and extract (name, price, unit) for each product.
+    Returns a list of dicts: {name, price, unit}
+    """
+    results = []
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto("https://indian-flowers.com/", timeout=30000)
-            page.wait_for_load_state("networkidle", timeout=30000)
-            content = page.inner_text("body")
-            browser.close()
-            if content and len(content.strip()) > 100:
-                return content[:6000]
-            else:
-                raise ValueError("Empty or too-short content from website")
+        page.goto(url, timeout=30000)
+        page.wait_for_load_state("networkidle", timeout=20000)
+        html = page.inner_text("body")
+
+        # Each product appears as lines like:
+        #   "Mullai String 5ft $13.00"  or  "Jasmine String $13.00 $11.00" (sale)
+        # We parse: product name  +  final (current / lowest) price
+        # Pattern: capture everything before the last $XX.XX on the line
+        for line in html.splitlines():
+            line = line.strip()
+            # Find all dollar amounts on this line
+            prices = re.findall(r'\$(\d+(?:\.\d{2})?)', line)
+            if not prices:
+                continue
+            # Skip lines that are clearly navigation/footer noise
+            if len(line) > 120 or line.lower().startswith(("home", "skip", "menu", "search", "copyright")):
+                continue
+            # The last price is the current (sale) price; first is original
+            current_price = float(prices[-1])
+            if current_price <= 0:
+                continue
+            # Remove all "$XX.XX" fragments and the word "Sale!" to get the name
+            name_raw = re.sub(r'Sale!', '', line, flags=re.IGNORECASE)
+            name_raw = re.sub(r'\$\d+(?:\.\d{2})?[^\s]*', '', name_raw)
+            name_raw = re.sub(r'(Original price was|Current price is|Add to cart|Read more)', '', name_raw, flags=re.IGNORECASE)
+            name_raw = re.sub(r'\s+', ' ', name_raw).strip().strip('.')
+
+            if len(name_raw) < 3 or len(name_raw) > 80:
+                continue
+
+            # Derive unit from name (e.g. "5ft", "100g", "piece", "pair", "pack")
+            unit = "piece"
+            name_low = name_raw.lower()
+            if "5ft" in name_low or "5 ft" in name_low:
+                unit = "box (5 ft)"
+            elif "100g" in name_low or "100 g" in name_low:
+                unit = "100g"
+            elif "per foot" in name_low or "/ft" in name_low:
+                unit = "per foot"
+            elif "pair" in name_low:
+                unit = "pair"
+            elif "pack" in name_low:
+                unit = "pack"
+            elif "set" in name_low:
+                unit = "set"
+
+            # Normalise the key: lowercase, strip size suffixes for matching
+            key = re.sub(r'\s*(5ft|5 ft|100g|per foot)\s*', ' ', name_raw, flags=re.IGNORECASE)
+            key = key.strip().lower()
+
+            results.append({"name": key, "price": current_price, "unit": unit, "display": name_raw})
+
     except Exception as e:
-        print(f"[Playwright fetch error]: {e}")
-        return (
-            "The Indian Flowers USA (Malar Traders) delivers fresh Indian flowers "
-            "and garlands nationwide across the USA. "
-            "Products include jasmine strings, mullai strings, rose petal garlands, "
-            "carnation garlands, wedding garlands, temple garlands, pooja garlands, "
-            "marigold garlands, veni, jadai, gajra, and loose flowers. "
-            "Shipping: Local $30, California $55, Nationwide $70. "
-            "Payment via Zelle to Malar Traders only."
-        )
+        print(f"[scrape_category error] {url}: {e}")
 
-WEBSITE_INFO = load_knowledge()
+    return results
+
 
 # ─────────────────────────────────────────────
-# 4. PRODUCT CATALOG — from live website
+# 4. KNOWLEDGE BASE + PRODUCT CATALOG
+#    Both fetched live from indian-flowers.com
 # ─────────────────────────────────────────────
-PRODUCTS = {
+
+# The flower/garland category URLs to scrape for products & prices
+FLOWER_CATEGORY_URLS = [
+    "https://indian-flowers.com/product-category/strings/",
+    "https://indian-flowers.com/product-category/pooja-flowers/",
+    "https://indian-flowers.com/product-category/green-leafs/",
+    "https://indian-flowers.com/product-category/indian-wedding-garlands/",
+    "https://indian-flowers.com/product-category/temple-and-pooja-garlands/",
+    "https://indian-flowers.com/product-category/house-warming-garlands/",
+    "https://indian-flowers.com/product-category/veni/",
+    "https://indian-flowers.com/product-category/nanthiyavattam-garlands/",
+    "https://indian-flowers.com/product-category/tube-rose-garlands/",
+    "https://indian-flowers.com/product-category/coconut/",
+]
+
+FALLBACK_PRODUCTS = {
     "jasmine string":        {"price": 13.00,  "unit": "box (5 ft)"},
     "jathimalli string":     {"price": 15.00,  "unit": "box (5 ft)"},
     "mullai string":         {"price": 13.00,  "unit": "box (5 ft)"},
@@ -145,6 +197,75 @@ PRODUCTS = {
     "vadamalli garland":     {"price": 26.00,  "unit": "per foot"},
     "bouquet":               {"price": 8.00,   "unit": "piece"},
 }
+
+
+@st.cache_data(ttl=3600)
+def load_knowledge_and_products() -> tuple[str, dict]:
+    """
+    Single Playwright session that:
+      1. Scrapes the homepage for general knowledge text
+      2. Visits each flower category page to extract live product prices
+    Returns (website_info_str, products_dict)
+    """
+    website_info = ""
+    products = {}
+
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+
+            # ── Step 1: homepage knowledge text ──
+            try:
+                page.goto("https://indian-flowers.com/", timeout=30000)
+                page.wait_for_load_state("networkidle", timeout=20000)
+                content = page.inner_text("body")
+                if content and len(content.strip()) > 100:
+                    website_info = content[:6000]
+            except Exception as e:
+                print(f"[Homepage fetch error]: {e}")
+
+            # ── Step 2: scrape each category for live prices ──
+            seen_keys = set()
+            for cat_url in FLOWER_CATEGORY_URLS:
+                items = scrape_category(page, cat_url)
+                for item in items:
+                    key = item["name"]
+                    if key not in seen_keys and len(key) >= 3:
+                        products[key] = {"price": item["price"], "unit": item["unit"]}
+                        seen_keys.add(key)
+
+            browser.close()
+
+    except Exception as e:
+        print(f"[Playwright session error]: {e}")
+
+    # Fallback if scraping returned nothing useful
+    if len(products) < 5:
+        print("[Products] Scraping returned too few products — using fallback.")
+        products = FALLBACK_PRODUCTS
+
+    if not website_info:
+        website_info = (
+            "The Indian Flowers USA (Malar Traders) delivers fresh Indian flowers "
+            "and garlands nationwide across the USA. "
+            "Products include jasmine strings, mullai strings, rose petal garlands, "
+            "carnation garlands, wedding garlands, temple garlands, pooja garlands, "
+            "marigold garlands, veni, jadai, gajra, and loose flowers. "
+            "Shipping: Local $30, California $55, Nationwide $70. "
+            "Payment via Zelle to Malar Traders only."
+        )
+
+    print(f"[Products] Loaded {len(products)} products from live website.")
+    return website_info, products
+
+
+# Load once, cached for 1 hour
+WEBSITE_INFO, PRODUCTS = load_knowledge_and_products()
+
+# Sidebar: show source
+st.sidebar.success(f"✅ Live prices loaded from indian-flowers.com ({len(PRODUCTS)} products)")
 
 PRODUCT_CATALOG_TEXT = "\n".join(
     f"  - {name.title()}: ${v['price']:.2f} per {v['unit']}"
@@ -358,7 +479,7 @@ YOUR ROLE:
 LIVE WEBSITE CONTENT (updated every hour):
 {WEBSITE_INFO[:4000]}
 
-PRODUCT CATALOG WITH PRICING (use this for reference and answering price questions):
+PRODUCT CATALOG WITH PRICING (live from indian-flowers.com, updated every hour):
 {PRODUCT_CATALOG_TEXT}
 
 PRICING NOTES:
