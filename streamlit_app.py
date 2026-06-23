@@ -274,41 +274,6 @@ def load_knowledge_and_products() -> tuple[str, dict]:
 # Load once, cached for 1 hour
 WEBSITE_INFO, PRODUCTS = load_knowledge_and_products()
 
-# Sidebar: show source
-st.sidebar.success(f"✅ Live prices loaded from indian-flowers.com ({len(PRODUCTS)} products)")
-
-# ── Email helper functions (defined early for sidebar use) ──
-def get_today_str() -> str:
-    return datetime.datetime.now().strftime("%B %d, %Y")
-
-def get_current_hour_et() -> int:
-    utc_now = datetime.datetime.utcnow()
-    et_now = utc_now - datetime.timedelta(hours=4)
-    return et_now.hour
-
-# Sidebar: daily summary email
-st.sidebar.divider()
-st.sidebar.subheader("📧 Daily Order Summary")
-todays_orders = st.session_state.get("all_confirmed_orders", [])
-st.sidebar.metric("Chat Orders Today", len(todays_orders))
-total_today = sum(o.get("grand_total", 0) for o in todays_orders)
-if todays_orders:
-    st.sidebar.metric("Total Revenue Today", f"${total_today:.2f}")
-
-already_sent = st.session_state.get("email_sent_date") == get_today_str()
-if already_sent:
-    st.sidebar.success("✅ Summary email sent today")
-
-if st.sidebar.button("📤 Send Summary Email Now", use_container_width=True):
-    with st.sidebar:
-        with st.spinner("Sending email..."):
-            success = send_daily_email(todays_orders)
-        if success:
-            st.session_state["email_sent_date"] = get_today_str()
-            st.success("✅ Email sent successfully!")
-        else:
-            st.error("❌ Failed — check Gmail credentials in Streamlit secrets")
-
 PRODUCT_CATALOG_TEXT = "\n".join(
     f"  - {name.title()}: ${v['price']:.2f} per {v['unit']}"
     for name, v in PRODUCTS.items()
@@ -615,6 +580,14 @@ def order_recap_text(memory: dict) -> str:
 # 10. DAILY EMAIL SUMMARY
 # ─────────────────────────────────────────────
 
+def get_today_str() -> str:
+    return datetime.datetime.now().strftime("%B %d, %Y")
+
+def get_current_hour_et() -> int:
+    utc_now = datetime.datetime.utcnow()
+    et_now = utc_now - datetime.timedelta(hours=4)
+    return et_now.hour
+
 def build_email_html(chat_orders: list) -> str:
     """Build a nicely formatted HTML email with all confirmed chat orders for today."""
     today = get_today_str()
@@ -789,6 +762,32 @@ init_session()
 
 # ── Auto-send check (runs on every page load/interaction) ──
 maybe_auto_send_email()
+
+# ── Sidebar: live price status ──
+st.sidebar.success(f"✅ Live prices loaded from indian-flowers.com ({len(PRODUCTS)} products)")
+
+# ── Sidebar: daily summary email ──
+st.sidebar.divider()
+st.sidebar.subheader("📧 Daily Order Summary")
+todays_orders = st.session_state.get("all_confirmed_orders", [])
+st.sidebar.metric("Chat Orders Today", len(todays_orders))
+total_today = sum(o.get("grand_total", 0) for o in todays_orders)
+if todays_orders:
+    st.sidebar.metric("Total Revenue Today", f"${total_today:.2f}")
+
+already_sent = st.session_state.get("email_sent_date") == get_today_str()
+if already_sent:
+    st.sidebar.success("✅ Summary email sent today")
+
+if st.sidebar.button("📤 Send Summary Email Now", use_container_width=True):
+    with st.sidebar:
+        with st.spinner("Sending email..."):
+            success = send_daily_email(todays_orders)
+        if success:
+            st.session_state["email_sent_date"] = get_today_str()
+            st.success("✅ Email sent successfully!")
+        else:
+            st.error("❌ Failed — check Gmail credentials in Streamlit secrets")
 
 # ─────────────────────────────────────────────
 # 11. DISPLAY CHAT HISTORY
