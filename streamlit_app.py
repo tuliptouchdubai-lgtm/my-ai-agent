@@ -46,7 +46,13 @@ install_playwright()
 # ─────────────────────────────────────────────
 @st.cache_resource
 def get_llms():
-    groq_api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY", "")
+    try:
+        groq_api_key = st.secrets["GROQ_API_KEY"]
+    except Exception:
+        try:
+            groq_api_key = st.secrets["groq_api_key"]
+        except Exception:
+            groq_api_key = os.environ.get("GROQ_API_KEY", "")
     chat_llm = ChatGroq(
         model="llama-3.3-70b-versatile",
         temperature=0.2,
@@ -698,9 +704,10 @@ def build_email_html(chat_orders: list) -> str:
 def send_daily_email(chat_orders: list) -> bool:
     """Send the daily summary email via Gmail SMTP. Returns True on success."""
     try:
-        sender       = st.secrets.get("GMAIL_SENDER", "")
-        app_password = st.secrets.get("GMAIL_APP_PASSWORD", "")
-        recipient    = st.secrets.get("OWNER_EMAIL", "")
+        gmail        = st.secrets.get("gmail", {})
+        sender       = gmail.get("user", "")
+        app_password = gmail.get("password", "")
+        recipient    = gmail.get("owner", "")
 
         if not all([sender, app_password, recipient]):
             print("[Email] Missing Gmail credentials in secrets.")
