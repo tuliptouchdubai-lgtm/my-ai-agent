@@ -47,10 +47,10 @@ install_playwright()
 @st.cache_resource
 def get_llms():
     try:
-        groq_api_key = st.secrets["GROQ_API_KEY"]
+        groq_api_key = st.secrets["groq"]["api_key"]
     except Exception:
         try:
-            groq_api_key = st.secrets["groq_api_key"]
+            groq_api_key = st.secrets["GROQ_API_KEY"]
         except Exception:
             groq_api_key = os.environ.get("GROQ_API_KEY", "")
     chat_llm = ChatGroq(
