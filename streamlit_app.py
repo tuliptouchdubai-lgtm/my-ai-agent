@@ -99,7 +99,7 @@ def get_wc_auth_header():
 #    stock status, categories from the REST API.
 #    Cached 1 hour so it doesn't hammer the API.
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1)
 def fetch_wc_products() -> dict:
     """
     Returns dict: { "product name lowercase": {"price": float, "unit": str, "stock": str} }
