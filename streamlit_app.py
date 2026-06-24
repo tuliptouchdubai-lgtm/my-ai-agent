@@ -5,6 +5,7 @@ import subprocess
 import sys
 import smtplib
 import datetime
+import requests                          # ← NEW: for WooCommerce REST API
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import streamlit as st
@@ -42,7 +43,7 @@ def install_playwright():
 install_playwright()
 
 # ─────────────────────────────────────────────
-# 2. LLM SETUP — cached so it loads only once
+# 2. LLM SETUP
 # ─────────────────────────────────────────────
 @st.cache_resource
 def get_llms():
@@ -70,92 +71,236 @@ def get_llms():
 chat_llm, extract_llm = get_llms()
 
 # ─────────────────────────────────────────────
-# 3. SCRAPER HELPER — fetch one category page
+# 3. WOOCOMMERCE CREDENTIALS  ← NEW
 # ─────────────────────────────────────────────
-def scrape_category(page, url: str) -> list[dict]:
+def get_wc_creds():
+    try:
+        wc = st.secrets["woocommerce"]
+        return wc["url"].rstrip("/"), wc["consumer_key"], wc["consumer_secret"]
+    except Exception:
+        return (
+            os.environ.get("WC_URL", ""),
+            os.environ.get("WC_CONSUMER_KEY", ""),
+            os.environ.get("WC_CONSUMER_SECRET", ""),
+        )
+
+WC_URL, WC_KEY, WC_SECRET = get_wc_creds()
+
+# ─────────────────────────────────────────────
+# 4. WOOCOMMERCE — LIVE PRODUCTS  ← NEW
+#    Fetches all published products with price,
+#    stock status, categories from the REST API.
+#    Cached 1 hour so it doesn't hammer the API.
+# ─────────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def fetch_wc_products() -> dict:
     """
-    Visit a WooCommerce category page and extract (name, price, unit) for each product.
-    Returns a list of dicts: {name, price, unit}
+    Returns dict: { "product name lowercase": {"price": float, "unit": str, "stock": str} }
+    Falls back to FALLBACK_PRODUCTS if API is unreachable.
     """
+    if not WC_URL or not WC_KEY:
+        print("[WC Products] No credentials — using fallback.")
+        return {}
+
+    products = {}
+    page = 1
+    while True:
+        try:
+            resp = requests.get(
+                f"{WC_URL}/wp-json/wc/v3/products",
+                params={
+                    "consumer_key":    WC_KEY,
+                    "consumer_secret": WC_SECRET,
+                    "per_page":        100,
+                    "page":            page,
+                    "status":          "publish",
+                },
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                print(f"[WC Products] API error {resp.status_code}")
+                break
+            batch = resp.json()
+            if not batch:
+                break
+            for p in batch:
+                raw_name = p.get("name", "").strip()
+                if not raw_name:
+                    continue
+                name = raw_name.lower()
+                price_str = p.get("price") or p.get("regular_price") or "0"
+                try:
+                    price = float(price_str)
+                except ValueError:
+                    price = 0.0
+                if price <= 0:
+                    continue
+
+                # Derive unit from product name (same logic as before)
+                unit = "piece"
+                name_low = name
+                if "5ft" in name_low or "5 ft" in name_low:
+                    unit = "box (5 ft)"
+                elif "100g" in name_low or "100 g" in name_low:
+                    unit = "100g"
+                elif "per foot" in name_low or "/ft" in name_low:
+                    unit = "per foot"
+                elif "pair" in name_low:
+                    unit = "pair"
+                elif "pack" in name_low:
+                    unit = "pack"
+                elif "set" in name_low:
+                    unit = "set"
+
+                products[name] = {
+                    "price": price,
+                    "unit":  unit,
+                    "stock": p.get("stock_status", "instock"),
+                }
+            page += 1
+            if len(batch) < 100:
+                break
+        except Exception as e:
+            print(f"[WC Products] Request error: {e}")
+            break
+
+    print(f"[WC Products] Loaded {len(products)} products from API.")
+    return products
+
+
+# ─────────────────────────────────────────────
+# 5. WOOCOMMERCE — FETCH TODAY'S WEBSITE ORDERS  ← NEW
+#    Pulls orders placed directly on the website
+#    (not via chat) for inclusion in daily email.
+# ─────────────────────────────────────────────
+def fetch_wc_orders_today() -> list:
+    """
+    Returns list of WooCommerce order dicts placed today.
+    Each dict has: id, customer name, email, phone, total,
+    items, shipping address, status.
+    """
+    if not WC_URL or not WC_KEY:
+        return []
+
+    today_start = datetime.datetime.now().replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).isoformat()
+
     results = []
     try:
-        page.goto(url, timeout=30000)
-        page.wait_for_load_state("networkidle", timeout=20000)
-        html = page.inner_text("body")
-
-        # Each product appears as lines like:
-        #   "Mullai String 5ft $13.00"  or  "Jasmine String $13.00 $11.00" (sale)
-        # We parse: product name  +  final (current / lowest) price
-        # Pattern: capture everything before the last $XX.XX on the line
-        for line in html.splitlines():
-            line = line.strip()
-            # Find all dollar amounts on this line
-            prices = re.findall(r'\$(\d+(?:\.\d{2})?)', line)
-            if not prices:
-                continue
-            # Skip lines that are clearly navigation/footer noise
-            if len(line) > 120 or line.lower().startswith(("home", "skip", "menu", "search", "copyright")):
-                continue
-            # The last price is the current (sale) price; first is original
-            current_price = float(prices[-1])
-            if current_price <= 0:
-                continue
-            # Remove all "$XX.XX" fragments and the word "Sale!" to get the name
-            name_raw = re.sub(r'Sale!', '', line, flags=re.IGNORECASE)
-            name_raw = re.sub(r'\$\d+(?:\.\d{2})?[^\s]*', '', name_raw)
-            name_raw = re.sub(r'(Original price was|Current price is|Add to cart|Read more)', '', name_raw, flags=re.IGNORECASE)
-            name_raw = re.sub(r'\s+', ' ', name_raw).strip().strip('.')
-
-            if len(name_raw) < 3 or len(name_raw) > 80:
-                continue
-
-            # Derive unit from name (e.g. "5ft", "100g", "piece", "pair", "pack")
-            unit = "piece"
-            name_low = name_raw.lower()
-            if "5ft" in name_low or "5 ft" in name_low:
-                unit = "box (5 ft)"
-            elif "100g" in name_low or "100 g" in name_low:
-                unit = "100g"
-            elif "per foot" in name_low or "/ft" in name_low:
-                unit = "per foot"
-            elif "pair" in name_low:
-                unit = "pair"
-            elif "pack" in name_low:
-                unit = "pack"
-            elif "set" in name_low:
-                unit = "set"
-
-            # Normalise the key: lowercase, strip size suffixes for matching
-            key = re.sub(r'\s*(5ft|5 ft|100g|per foot)\s*', ' ', name_raw, flags=re.IGNORECASE)
-            key = key.strip().lower()
-
-            results.append({"name": key, "price": current_price, "unit": unit, "display": name_raw})
-
+        resp = requests.get(
+            f"{WC_URL}/wp-json/wc/v3/orders",
+            params={
+                "consumer_key":    WC_KEY,
+                "consumer_secret": WC_SECRET,
+                "after":           today_start,
+                "per_page":        100,
+                "status":          "processing,completed,pending",
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            for order in resp.json():
+                billing  = order.get("billing", {})
+                line_items = [
+                    {
+                        "name":       item.get("name", ""),
+                        "qty":        item.get("quantity", 1),
+                        "unit_price": float(item.get("price", 0)),
+                        "total":      float(item.get("total", 0)),
+                    }
+                    for item in order.get("line_items", [])
+                ]
+                results.append({
+                    "order_id":   order.get("id"),
+                    "status":     order.get("status"),
+                    "name":       f"{billing.get('first_name','')} {billing.get('last_name','')}".strip(),
+                    "email":      billing.get("email", ""),
+                    "phone":      billing.get("phone", ""),
+                    "zip_code":   billing.get("postcode", ""),
+                    "city":       billing.get("city", ""),
+                    "state":      billing.get("state", ""),
+                    "items":      line_items,
+                    "total":      float(order.get("total", 0)),
+                    "created_at": order.get("date_created", ""),
+                })
+        else:
+            print(f"[WC Orders] API error {resp.status_code}")
     except Exception as e:
-        print(f"[scrape_category error] {url}: {e}")
+        print(f"[WC Orders] Request error: {e}")
 
+    print(f"[WC Orders] Found {len(results)} website orders today.")
     return results
 
 
 # ─────────────────────────────────────────────
-# 4. KNOWLEDGE BASE + PRODUCT CATALOG
-#    Both fetched live from indian-flowers.com
+# 6. WOOCOMMERCE — FETCH CATEGORIES  ← NEW
+#    Used to enrich the AI knowledge base with
+#    live category names and descriptions.
 # ─────────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def fetch_wc_categories() -> str:
+    """Returns a text summary of all product categories for the AI system prompt."""
+    if not WC_URL or not WC_KEY:
+        return ""
+    try:
+        resp = requests.get(
+            f"{WC_URL}/wp-json/wc/v3/products/categories",
+            params={
+                "consumer_key":    WC_KEY,
+                "consumer_secret": WC_SECRET,
+                "per_page":        100,
+                "hide_empty":      True,
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            cats = resp.json()
+            lines = ["PRODUCT CATEGORIES (live from website):"]
+            for c in cats:
+                desc = re.sub(r'<[^>]+>', '', c.get("description", "")).strip()
+                line = f"  - {c['name']} ({c.get('count', 0)} products)"
+                if desc:
+                    line += f": {desc[:100]}"
+                lines.append(line)
+            return "\n".join(lines)
+    except Exception as e:
+        print(f"[WC Categories] Error: {e}")
+    return ""
 
-# The flower/garland category URLs to scrape for products & prices
-FLOWER_CATEGORY_URLS = [
-    "https://indian-flowers.com/product-category/strings/",
-    "https://indian-flowers.com/product-category/pooja-flowers/",
-    "https://indian-flowers.com/product-category/green-leafs/",
-    "https://indian-flowers.com/product-category/indian-wedding-garlands/",
-    "https://indian-flowers.com/product-category/temple-and-pooja-garlands/",
-    "https://indian-flowers.com/product-category/house-warming-garlands/",
-    "https://indian-flowers.com/product-category/veni/",
-    "https://indian-flowers.com/product-category/nanthiyavattam-garlands/",
-    "https://indian-flowers.com/product-category/tube-rose-garlands/",
-    "https://indian-flowers.com/product-category/coconut/",
-]
 
+# ─────────────────────────────────────────────
+# 7. SCRAPER HELPER — fetch /shop + homepage
+#    Playwright is KEPT for rich page knowledge:
+#    banners, announcements, /shop descriptions.
+#    It is NOT used for pricing anymore (API does that).
+# ─────────────────────────────────────────────
+def scrape_shop_knowledge(page) -> str:
+    """
+    Visits /shop and homepage to extract general knowledge text:
+    announcements, delivery info, banners, policies.
+    NOT used for pricing — WooCommerce API handles that.
+    """
+    knowledge = ""
+    urls_to_scrape = [
+        "https://indian-flowers.com/",
+        "https://indian-flowers.com/shop/",
+    ]
+    for url in urls_to_scrape:
+        try:
+            page.goto(url, timeout=30000)
+            page.wait_for_load_state("networkidle", timeout=20000)
+            content = page.inner_text("body")
+            if content and len(content.strip()) > 100:
+                knowledge += content[:3000] + "\n\n"
+        except Exception as e:
+            print(f"[Playwright scrape error] {url}: {e}")
+    return knowledge.strip()
+
+
+# ─────────────────────────────────────────────
+# 8. FALLBACK PRODUCTS (if API is down)
+# ─────────────────────────────────────────────
 FALLBACK_PRODUCTS = {
     "jasmine string":        {"price": 13.00,  "unit": "box (5 ft)"},
     "jathimalli string":     {"price": 15.00,  "unit": "box (5 ft)"},
@@ -209,52 +354,38 @@ FALLBACK_PRODUCTS = {
 }
 
 
+# ─────────────────────────────────────────────
+# 9. LOAD KNOWLEDGE BASE + PRODUCTS
+#    Playwright  → /shop + homepage knowledge text
+#    WooCommerce API → live prices + categories
+# ─────────────────────────────────────────────
 @st.cache_data(ttl=3600)
-def load_knowledge_and_products() -> tuple[str, dict]:
+def load_knowledge_and_products() -> tuple[str, dict, str]:
     """
-    Single Playwright session that:
-      1. Scrapes the homepage for general knowledge text
-      2. Visits each flower category page to extract live product prices
-    Returns (website_info_str, products_dict)
+    Returns (website_info_str, products_dict, categories_str)
     """
     website_info = ""
-    products = {}
+    products     = {}
 
+    # ── Step 1: WooCommerce API for live prices ──
+    products = fetch_wc_products()
+    if len(products) < 5:
+        print("[Products] API returned too few — using fallback.")
+        products = FALLBACK_PRODUCTS
+
+    # ── Step 2: WooCommerce API for categories ──
+    categories_text = fetch_wc_categories()
+
+    # ── Step 3: Playwright for /shop + homepage rich text ──
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-
-            # ── Step 1: homepage knowledge text ──
-            try:
-                page.goto("https://indian-flowers.com/", timeout=30000)
-                page.wait_for_load_state("networkidle", timeout=20000)
-                content = page.inner_text("body")
-                if content and len(content.strip()) > 100:
-                    website_info = content[:6000]
-            except Exception as e:
-                print(f"[Homepage fetch error]: {e}")
-
-            # ── Step 2: scrape each category for live prices ──
-            seen_keys = set()
-            for cat_url in FLOWER_CATEGORY_URLS:
-                items = scrape_category(page, cat_url)
-                for item in items:
-                    key = item["name"]
-                    if key not in seen_keys and len(key) >= 3:
-                        products[key] = {"price": item["price"], "unit": item["unit"]}
-                        seen_keys.add(key)
-
+            pw_page = browser.new_page()
+            website_info = scrape_shop_knowledge(pw_page)
             browser.close()
-
     except Exception as e:
         print(f"[Playwright session error]: {e}")
-
-    # Fallback if scraping returned nothing useful
-    if len(products) < 5:
-        print("[Products] Scraping returned too few products — using fallback.")
-        products = FALLBACK_PRODUCTS
 
     if not website_info:
         website_info = (
@@ -267,15 +398,16 @@ def load_knowledge_and_products() -> tuple[str, dict]:
             "Payment via Zelle to Malar Traders only."
         )
 
-    print(f"[Products] Loaded {len(products)} products from live website.")
-    return website_info, products
+    print(f"[Knowledge] Loaded. Products: {len(products)}, Categories scraped: {bool(categories_text)}")
+    return website_info, products, categories_text
 
 
 # Load once, cached for 1 hour
-WEBSITE_INFO, PRODUCTS = load_knowledge_and_products()
+WEBSITE_INFO, PRODUCTS, CATEGORIES_TEXT = load_knowledge_and_products()
 
 PRODUCT_CATALOG_TEXT = "\n".join(
     f"  - {name.title()}: ${v['price']:.2f} per {v['unit']}"
+    + (f" [OUT OF STOCK]" if v.get("stock") == "outofstock" else "")
     for name, v in PRODUCTS.items()
 )
 
@@ -293,7 +425,7 @@ SKIP_WORDS = {
 }
 
 # ─────────────────────────────────────────────
-# 5. SHIPPING CALCULATOR
+# 10. SHIPPING CALCULATOR
 # ─────────────────────────────────────────────
 LOCAL_ZIPS = {
     "92335", "92336", "92337", "92316", "92324", "92376", "92377",
@@ -365,9 +497,9 @@ def format_order_summary(summary: dict) -> str:
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────
-# 6. LEAD FIELDS
+# 11. LEAD FIELDS
 # ─────────────────────────────────────────────
-LEAD_FIELDS = ["name", "phone", "email", "zip_code"]
+LEAD_FIELDS    = ["name", "phone", "email", "zip_code"]
 LEAD_QUESTIONS = {
     "name":     "May I have your full name please? 😊",
     "phone":    "Thank you! Could you share your phone number?",
@@ -382,7 +514,7 @@ def next_missing_field(memory: dict):
     return None
 
 # ─────────────────────────────────────────────
-# 7. EXTRACTORS
+# 12. EXTRACTORS
 # ─────────────────────────────────────────────
 def regex_extract_lead(text: str, memory: dict) -> dict:
     updated = dict(memory)
@@ -470,7 +602,66 @@ def smart_extract_lead(text: str, memory: dict) -> dict:
     return updated
 
 # ─────────────────────────────────────────────
-# 8. SYSTEM PROMPT & CHAIN
+# 13. ENQUIRY TRACKER  ← NEW
+#     Records every customer question/topic so
+#     the daily email can summarise what people
+#     asked about, even if they didn't order.
+# ─────────────────────────────────────────────
+def track_enquiry(user_text: str, memory: dict):
+    """
+    Saves a timestamped enquiry record to session state.
+    Called on every customer message.
+    """
+    if "enquiries" not in st.session_state:
+        st.session_state.enquiries = []
+
+    low = user_text.lower()
+
+    # Detect what the customer was asking about
+    topics = []
+    for kw in ["wedding", "pooja", "temple", "birthday", "engagement",
+               "housewarming", "festival", "puja"]:
+        if kw in low:
+            topics.append(kw)
+    for kw in ORDER_KEYWORDS[:30]:   # top product keywords
+        if kw in low and len(kw) > 4:
+            topics.append(kw)
+
+    enquiry = {
+        "time":      datetime.datetime.now().strftime("%I:%M %p"),
+        "customer":  memory.get("name", "Unknown"),
+        "message":   user_text[:200],
+        "topics":    list(set(topics)) or ["general inquiry"],
+    }
+    st.session_state.enquiries.append(enquiry)
+
+
+def build_enquiry_summary_text() -> str:
+    """Builds a readable plain-text summary of all enquiries for the email."""
+    enquiries = st.session_state.get("enquiries", [])
+    if not enquiries:
+        return "No enquiries recorded today."
+
+    # Group by customer
+    by_customer = {}
+    for e in enquiries:
+        c = e["customer"]
+        if c not in by_customer:
+            by_customer[c] = []
+        by_customer[c].append(e)
+
+    lines = []
+    for customer, msgs in by_customer.items():
+        lines.append(f"\n👤 {customer}:")
+        for m in msgs:
+            topics_str = ", ".join(m["topics"])
+            lines.append(f"   [{m['time']}] Topics: {topics_str}")
+            lines.append(f"   Message: {m['message']}")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────
+# 14. SYSTEM PROMPT & CHAIN
 # ─────────────────────────────────────────────
 SYSTEM_PROMPT = f"""You are Priya, a warm sales assistant for The Indian Flowers USA (Malar Traders).
 
@@ -482,11 +673,14 @@ YOUR ROLE:
 - Use the customer's name warmly
 - Ask ONE question at a time only
 - NEVER mention product codes
+- If a product shows [OUT OF STOCK], apologize and suggest a similar available product
 
 LIVE WEBSITE CONTENT (updated every hour):
-{WEBSITE_INFO[:4000]}
+{WEBSITE_INFO[:3000]}
 
-PRODUCT CATALOG WITH PRICING (live from indian-flowers.com, updated every hour):
+{CATEGORIES_TEXT}
+
+PRODUCT CATALOG WITH PRICING (live from WooCommerce API, updated every hour):
 {PRODUCT_CATALOG_TEXT}
 
 PRICING NOTES:
@@ -521,7 +715,7 @@ chat_prompt = ChatPromptTemplate.from_messages([
 conversation_chain = chat_prompt | chat_llm | StrOutputParser()
 
 # ─────────────────────────────────────────────
-# 9. ORDER SUMMARY HELPERS
+# 15. ORDER SUMMARY HELPERS
 # ─────────────────────────────────────────────
 def order_confirmation_text(memory: dict) -> str:
     summary = build_order_summary(memory["order_items"], memory["zip_code"])
@@ -577,104 +771,257 @@ def order_recap_text(memory: dict) -> str:
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────
-# 10. DAILY EMAIL SUMMARY
+# 16. DAILY EMAIL — NOW WITH 3 SECTIONS  ← UPDATED
+#     Section 1: Website orders (WooCommerce API)
+#     Section 2: Chat orders (AI agent confirmed)
+#     Section 3: Chat enquiries summary
 # ─────────────────────────────────────────────
-
 def get_today_str() -> str:
     return datetime.datetime.now().strftime("%B %d, %Y")
 
 def get_current_hour_et() -> int:
     utc_now = datetime.datetime.utcnow()
-    et_now = utc_now - datetime.timedelta(hours=4)
+    et_now  = utc_now - datetime.timedelta(hours=4)
     return et_now.hour
 
-def build_email_html(chat_orders: list) -> str:
-    """Build a nicely formatted HTML email with all confirmed chat orders for today."""
-    today = get_today_str()
-    total_revenue = sum(
-        o.get("grand_total", 0) for o in chat_orders
-    )
+
+def build_website_orders_html(website_orders: list) -> str:
+    """HTML block for Section 1 — orders placed directly on the website."""
+    if not website_orders:
+        return "<p style='color:#888;'>No website orders found today via WooCommerce API.</p>"
 
     rows = ""
-    if chat_orders:
-        for i, order in enumerate(chat_orders, 1):
-            summary = order.get("confirmed_summary", {})
-            items_html = ""
-            for item in summary.get("items", []):
-                items_html += (
-                    f"<tr>"
-                    f"<td style='padding:4px 8px;'>{item['name'].title()}</td>"
-                    f"<td style='padding:4px 8px;text-align:center;'>{item['qty']}</td>"
-                    f"<td style='padding:4px 8px;'>{item['unit']}</td>"
-                    f"<td style='padding:4px 8px;text-align:right;'>${item['qty'] * item['unit_price']:.2f}</td>"
-                    f"</tr>"
-                )
-            shipping = summary.get("shipping", {})
-            rows += f"""
-            <div style="background:#fff8f0;border:1px solid #f0c08a;border-radius:8px;padding:16px;margin-bottom:16px;">
-                <h3 style="margin:0 0 8px;color:#b45309;">Order #{i} — {order.get('name','N/A')}</h3>
-                <p style="margin:2px 0;font-size:13px;color:#555;">
-                    📞 {order.get('phone','—')} &nbsp;|&nbsp;
-                    ✉️ {order.get('email','—')} &nbsp;|&nbsp;
-                    📍 ZIP: {order.get('zip_code','—')}
-                    {f"&nbsp;|&nbsp; 🎉 Occasion: {order.get('occasion','').title()}" if order.get('occasion') else ''}
-                </p>
-                <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:13px;">
-                    <thead>
-                        <tr style="background:#fde68a;">
-                            <th style="padding:4px 8px;text-align:left;">Product</th>
-                            <th style="padding:4px 8px;">Qty</th>
-                            <th style="padding:4px 8px;text-align:left;">Unit</th>
-                            <th style="padding:4px 8px;text-align:right;">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>{items_html}</tbody>
-                </table>
-                <p style="margin:8px 0 2px;font-size:13px;">
-                    <strong>Subtotal:</strong> ${summary.get('subtotal', 0):.2f} &nbsp;|&nbsp;
-                    <strong>Shipping ({shipping.get('method','')}):</strong> ${shipping.get('fee', 0):.2f}
-                </p>
-                <p style="margin:4px 0;font-size:15px;font-weight:bold;color:#16a34a;">
-                    Grand Total: ${order.get('grand_total', 0):.2f}
-                </p>
-            </div>
-            """
-    else:
-        rows = "<p style='color:#888;'>No confirmed orders via chat today.</p>"
+    for order in website_orders:
+        items_html = "".join(
+            f"<tr>"
+            f"<td style='padding:4px 8px;'>{item['name']}</td>"
+            f"<td style='padding:4px 8px;text-align:center;'>{item['qty']}</td>"
+            f"<td style='padding:4px 8px;text-align:right;'>${item['total']:.2f}</td>"
+            f"</tr>"
+            for item in order.get("items", [])
+        )
+        rows += f"""
+        <div style="background:#f0f9ff;border:1px solid #93c5fd;border-radius:8px;padding:14px;margin-bottom:12px;">
+            <h3 style="margin:0 0 6px;color:#1e40af;">
+                🛒 Order #{order['order_id']} — {order['name']}
+                <span style="font-size:11px;font-weight:normal;color:#6b7280;margin-left:8px;">
+                    [{order['status'].upper()}]
+                </span>
+            </h3>
+            <p style="margin:2px 0;font-size:13px;color:#555;">
+                📞 {order.get('phone','—')} &nbsp;|&nbsp;
+                ✉️ {order.get('email','—')} &nbsp;|&nbsp;
+                📍 {order.get('city','')}, {order.get('state','')} {order.get('zip_code','')}
+            </p>
+            <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;">
+                <thead>
+                    <tr style="background:#bfdbfe;">
+                        <th style="padding:4px 8px;text-align:left;">Product</th>
+                        <th style="padding:4px 8px;">Qty</th>
+                        <th style="padding:4px 8px;text-align:right;">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>{items_html}</tbody>
+            </table>
+            <p style="margin:8px 0 0;font-size:15px;font-weight:bold;color:#1d4ed8;">
+                Order Total: ${order['total']:.2f}
+            </p>
+        </div>
+        """
+    return rows
+
+
+def build_chat_orders_html(chat_orders: list) -> str:
+    """HTML block for Section 2 — orders confirmed through Priya AI chat."""
+    if not chat_orders:
+        return "<p style='color:#888;'>No confirmed orders via chat today.</p>"
+
+    rows = ""
+    for i, order in enumerate(chat_orders, 1):
+        summary    = order.get("confirmed_summary", {})
+        items_html = "".join(
+            f"<tr>"
+            f"<td style='padding:4px 8px;'>{item['name'].title()}</td>"
+            f"<td style='padding:4px 8px;text-align:center;'>{item['qty']}</td>"
+            f"<td style='padding:4px 8px;'>{item['unit']}</td>"
+            f"<td style='padding:4px 8px;text-align:right;'>${item['qty'] * item['unit_price']:.2f}</td>"
+            f"</tr>"
+            for item in summary.get("items", [])
+        )
+        shipping = summary.get("shipping", {})
+        rows += f"""
+        <div style="background:#fff8f0;border:1px solid #f0c08a;border-radius:8px;padding:14px;margin-bottom:12px;">
+            <h3 style="margin:0 0 6px;color:#b45309;">
+                💬 Chat Order #{i} — {order.get('name','N/A')}
+                <span style="font-size:11px;font-weight:normal;color:#6b7280;margin-left:8px;">
+                    [{order.get('confirmed_at','')}]
+                </span>
+            </h3>
+            <p style="margin:2px 0;font-size:13px;color:#555;">
+                📞 {order.get('phone','—')} &nbsp;|&nbsp;
+                ✉️ {order.get('email','—')} &nbsp;|&nbsp;
+                📍 ZIP: {order.get('zip_code','—')}
+                {f"&nbsp;|&nbsp; 🎉 {order.get('occasion','').title()}" if order.get('occasion') else ''}
+            </p>
+            <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;">
+                <thead>
+                    <tr style="background:#fde68a;">
+                        <th style="padding:4px 8px;text-align:left;">Product</th>
+                        <th style="padding:4px 8px;">Qty</th>
+                        <th style="padding:4px 8px;text-align:left;">Unit</th>
+                        <th style="padding:4px 8px;text-align:right;">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>{items_html}</tbody>
+            </table>
+            <p style="margin:8px 0 2px;font-size:13px;">
+                <strong>Subtotal:</strong> ${summary.get('subtotal',0):.2f} &nbsp;|&nbsp;
+                <strong>Shipping ({shipping.get('method','')}):</strong> ${shipping.get('fee',0):.2f}
+            </p>
+            <p style="margin:4px 0;font-size:15px;font-weight:bold;color:#16a34a;">
+                Grand Total: ${order.get('grand_total',0):.2f}
+            </p>
+        </div>
+        """
+    return rows
+
+
+def build_enquiries_html(enquiries: list) -> str:
+    """HTML block for Section 3 — chat enquiries summary."""
+    if not enquiries:
+        return "<p style='color:#888;'>No enquiries recorded today.</p>"
+
+    # Group by customer
+    by_customer = {}
+    for e in enquiries:
+        c = e["customer"]
+        if c not in by_customer:
+            by_customer[c] = []
+        by_customer[c].append(e)
+
+    rows = ""
+    for customer, msgs in by_customer.items():
+        all_topics = []
+        for m in msgs:
+            all_topics.extend(m.get("topics", []))
+        unique_topics = list(set(all_topics))
+
+        msg_rows = "".join(
+            f"<tr>"
+            f"<td style='padding:3px 8px;color:#6b7280;font-size:12px;'>{m['time']}</td>"
+            f"<td style='padding:3px 8px;font-size:13px;'>{m['message']}</td>"
+            f"</tr>"
+            for m in msgs[:5]   # show max 5 messages per customer
+        )
+        rows += f"""
+        <div style="background:#f9fafb;border:1px solid #d1d5db;border-radius:8px;padding:12px;margin-bottom:10px;">
+            <h4 style="margin:0 0 4px;color:#374151;">👤 {customer}</h4>
+            <p style="margin:0 0 6px;font-size:12px;color:#6b7280;">
+                Interested in: <strong>{', '.join(unique_topics) or 'general inquiry'}</strong>
+                &nbsp;|&nbsp; {len(msgs)} message(s)
+            </p>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                {msg_rows}
+            </table>
+        </div>
+        """
+    return rows
+
+
+def build_email_html(chat_orders: list, website_orders: list, enquiries: list) -> str:
+    """
+    Full HTML email with 3 sections:
+      1. Website Orders (WooCommerce API)
+      2. Chat Orders (AI agent confirmed)
+      3. Chat Enquiries Summary
+    """
+    today         = get_today_str()
+    chat_revenue  = sum(o.get("grand_total", 0) for o in chat_orders)
+    web_revenue   = sum(o.get("total", 0) for o in website_orders)
+    total_revenue = chat_revenue + web_revenue
 
     html = f"""
     <html><body style="font-family:Arial,sans-serif;background:#fafafa;padding:24px;">
-        <div style="max-width:620px;margin:auto;background:white;border-radius:12px;
-                    box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
-            <div style="background:linear-gradient(135deg,#f97316,#ec4899);padding:24px;text-align:center;">
-                <h1 style="color:white;margin:0;font-size:22px;">🌸 The Indian Flowers USA</h1>
-                <p style="color:#ffe4e6;margin:4px 0 0;">Daily Order Summary — {today}</p>
-            </div>
-            <div style="padding:24px;">
-                <h2 style="color:#92400e;border-bottom:2px solid #fde68a;padding-bottom:8px;">
-                    💬 Chat Orders ({len(chat_orders)} confirmed)
-                </h2>
-                {rows}
-                <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;
-                            padding:16px;margin-top:16px;text-align:center;">
-                    <p style="margin:0;font-size:18px;font-weight:bold;color:#15803d;">
-                        Total Chat Revenue Today: ${total_revenue:.2f}
-                    </p>
-                </div>
-                <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb;">
-                <p style="font-size:12px;color:#9ca3af;text-align:center;">
-                    Auto-generated by Priya AI Agent · {today}<br>
-                    💳 Payment: Zelle to Malar Traders
-                </p>
-            </div>
+    <div style="max-width:640px;margin:auto;background:white;border-radius:12px;
+                box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+
+        <!-- HEADER -->
+        <div style="background:linear-gradient(135deg,#f97316,#ec4899);padding:24px;text-align:center;">
+            <h1 style="color:white;margin:0;font-size:22px;">🌸 The Indian Flowers USA</h1>
+            <p style="color:#ffe4e6;margin:4px 0 0;">Daily Summary Report — {today}</p>
         </div>
+
+        <div style="padding:24px;">
+
+            <!-- REVENUE SUMMARY BAR -->
+            <div style="display:flex;gap:12px;margin-bottom:24px;">
+                <div style="flex:1;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;
+                            padding:12px;text-align:center;">
+                    <p style="margin:0;font-size:12px;color:#6b7280;">Website Orders</p>
+                    <p style="margin:4px 0 0;font-size:18px;font-weight:bold;color:#15803d;">
+                        ${web_revenue:.2f}
+                    </p>
+                    <p style="margin:0;font-size:11px;color:#9ca3af;">{len(website_orders)} order(s)</p>
+                </div>
+                <div style="flex:1;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;
+                            padding:12px;text-align:center;">
+                    <p style="margin:0;font-size:12px;color:#6b7280;">Chat Orders</p>
+                    <p style="margin:4px 0 0;font-size:18px;font-weight:bold;color:#c2410c;">
+                        ${chat_revenue:.2f}
+                    </p>
+                    <p style="margin:0;font-size:11px;color:#9ca3af;">{len(chat_orders)} order(s)</p>
+                </div>
+                <div style="flex:1;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;
+                            padding:12px;text-align:center;">
+                    <p style="margin:0;font-size:12px;color:#6b7280;">Total Revenue</p>
+                    <p style="margin:4px 0 0;font-size:18px;font-weight:bold;color:#1d4ed8;">
+                        ${total_revenue:.2f}
+                    </p>
+                    <p style="margin:0;font-size:11px;color:#9ca3af;">{len(enquiries)} enquiries</p>
+                </div>
+            </div>
+
+            <!-- SECTION 1: WEBSITE ORDERS -->
+            <h2 style="color:#1e40af;border-bottom:2px solid #bfdbfe;padding-bottom:8px;">
+                🛒 Section 1 — Website Orders ({len(website_orders)})
+            </h2>
+            {build_website_orders_html(website_orders)}
+
+            <!-- SECTION 2: CHAT ORDERS -->
+            <h2 style="color:#92400e;border-bottom:2px solid #fde68a;padding-bottom:8px;margin-top:28px;">
+                💬 Section 2 — Chat Orders ({len(chat_orders)})
+            </h2>
+            {build_chat_orders_html(chat_orders)}
+
+            <!-- SECTION 3: ENQUIRIES SUMMARY -->
+            <h2 style="color:#374151;border-bottom:2px solid #d1d5db;padding-bottom:8px;margin-top:28px;">
+                🔍 Section 3 — Chat Enquiries Summary ({len(enquiries)})
+            </h2>
+            <p style="font-size:13px;color:#6b7280;margin-top:0;">
+                Customers who enquired but may not have ordered yet — potential follow-ups.
+            </p>
+            {build_enquiries_html(enquiries)}
+
+            <!-- FOOTER -->
+            <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb;">
+            <p style="font-size:12px;color:#9ca3af;text-align:center;">
+                Auto-generated by Priya AI Agent · {today}<br>
+                💳 Payment: Zelle to Malar Traders
+            </p>
+        </div>
+    </div>
     </body></html>
     """
     return html
 
 
-def send_daily_email(chat_orders: list) -> bool:
-    """Send the daily summary email via Gmail SMTP. Returns True on success."""
+def send_daily_email(chat_orders: list, website_orders: list = None, enquiries: list = None) -> bool:
+    """Send the daily summary email. Returns True on success."""
+    if website_orders is None:
+        website_orders = fetch_wc_orders_today()   # ← fetch live from WooCommerce
+    if enquiries is None:
+        enquiries = st.session_state.get("enquiries", [])
+
     try:
         gmail        = st.secrets.get("gmail", {})
         sender       = gmail.get("user", "")
@@ -685,12 +1032,12 @@ def send_daily_email(chat_orders: list) -> bool:
             print("[Email] Missing Gmail credentials in secrets.")
             return False
 
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"🌸 Indian Flowers — Daily Orders Summary {get_today_str()}"
+        msg            = MIMEMultipart("alternative")
+        msg["Subject"] = f"🌸 Indian Flowers — Daily Summary {get_today_str()}"
         msg["From"]    = f"Priya AI Agent <{sender}>"
         msg["To"]      = recipient
 
-        html_body = build_email_html(chat_orders)
+        html_body = build_email_html(chat_orders, website_orders, enquiries)
         msg.attach(MIMEText(html_body, "html"))
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
@@ -705,30 +1052,23 @@ def send_daily_email(chat_orders: list) -> bool:
         return False
 
 
-def collect_todays_orders() -> list:
-    """Pull all confirmed orders stored in today's session."""
-    orders = []
-    for entry in st.session_state.get("all_confirmed_orders", []):
-        orders.append(entry)
-    return orders
-
-
 def maybe_auto_send_email():
     """Auto-send daily summary at 9 PM ET if not already sent today."""
-    today = get_today_str()
+    today        = get_today_str()
     already_sent = st.session_state.get("email_sent_date") == today
     if already_sent:
         return
-    hour = get_current_hour_et()
-    if hour >= 21:  # 9 PM ET
-        orders = collect_todays_orders()
-        success = send_daily_email(orders)
+    if get_current_hour_et() >= 21:
+        chat_orders    = st.session_state.get("all_confirmed_orders", [])
+        website_orders = fetch_wc_orders_today()
+        enquiries      = st.session_state.get("enquiries", [])
+        success        = send_daily_email(chat_orders, website_orders, enquiries)
         if success:
             st.session_state["email_sent_date"] = today
 
 
 # ─────────────────────────────────────────────
-# 10. SESSION STATE INIT
+# 17. SESSION STATE INIT
 # ─────────────────────────────────────────────
 def init_session():
     if "memory" not in st.session_state:
@@ -755,49 +1095,53 @@ def init_session():
         st.session_state.lc_history = []
     if "all_confirmed_orders" not in st.session_state:
         st.session_state.all_confirmed_orders = []
+    if "enquiries" not in st.session_state:        # ← NEW
+        st.session_state.enquiries = []
     if "email_sent_date" not in st.session_state:
         st.session_state.email_sent_date = None
 
 init_session()
-
-# ── Auto-send check (runs on every page load/interaction) ──
 maybe_auto_send_email()
 
-# ── Sidebar: live price status ──
-st.sidebar.success(f"✅ Live prices loaded from indian-flowers.com ({len(PRODUCTS)} products)")
+# ── Sidebar ──
+wc_status = "✅ WooCommerce API" if WC_KEY else "⚠️ Fallback prices"
+st.sidebar.success(f"{wc_status} — {len(PRODUCTS)} products loaded")
 
-# ── Sidebar: daily summary email ──
 st.sidebar.divider()
 st.sidebar.subheader("📧 Daily Order Summary")
-todays_orders = st.session_state.get("all_confirmed_orders", [])
-st.sidebar.metric("Chat Orders Today", len(todays_orders))
-total_today = sum(o.get("grand_total", 0) for o in todays_orders)
-if todays_orders:
-    st.sidebar.metric("Total Revenue Today", f"${total_today:.2f}")
+todays_chat_orders = st.session_state.get("all_confirmed_orders", [])
+todays_enquiries   = st.session_state.get("enquiries", [])
+st.sidebar.metric("Chat Orders Today",  len(todays_chat_orders))
+st.sidebar.metric("Enquiries Today",    len(todays_enquiries))
+total_today = sum(o.get("grand_total", 0) for o in todays_chat_orders)
+if todays_chat_orders:
+    st.sidebar.metric("Chat Revenue Today", f"${total_today:.2f}")
 
-already_sent = st.session_state.get("email_sent_date") == get_today_str()
-if already_sent:
+if st.session_state.get("email_sent_date") == get_today_str():
     st.sidebar.success("✅ Summary email sent today")
 
 if st.sidebar.button("📤 Send Summary Email Now", use_container_width=True):
     with st.sidebar:
-        with st.spinner("Sending email..."):
-            success = send_daily_email(todays_orders)
+        with st.spinner("Fetching website orders & sending email..."):
+            website_orders = fetch_wc_orders_today()
+            success        = send_daily_email(
+                todays_chat_orders, website_orders, todays_enquiries
+            )
         if success:
             st.session_state["email_sent_date"] = get_today_str()
-            st.success("✅ Email sent successfully!")
+            st.success(f"✅ Email sent! ({len(website_orders)} website orders + {len(todays_chat_orders)} chat orders)")
         else:
             st.error("❌ Failed — check Gmail credentials in Streamlit secrets")
 
 # ─────────────────────────────────────────────
-# 11. DISPLAY CHAT HISTORY
+# 18. DISPLAY CHAT HISTORY
 # ─────────────────────────────────────────────
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🌸" if msg["role"] == "assistant" else "👤"):
         st.markdown(msg["content"])
 
 # ─────────────────────────────────────────────
-# 12. HANDLE USER INPUT
+# 19. HANDLE USER INPUT
 # ─────────────────────────────────────────────
 CONFIRM_TRIGGERS = {
     "confirm", "yes confirm", "proceed", "confirm order", "place order",
@@ -810,6 +1154,9 @@ if user_input := st.chat_input("Type your message here..."):
     lowered = user_input.lower().strip()
     stage   = memory.get("stage", "lead_capture")
 
+    # ── Track every message as an enquiry  ← NEW ──
+    track_enquiry(user_input, memory)
+
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
@@ -818,7 +1165,7 @@ if user_input := st.chat_input("Type your message here..."):
 
     # ── STAGE 1: LEAD CAPTURE ──────────────────────────────────────────
     if stage == "lead_capture":
-        memory = smart_extract_lead(user_input, memory)
+        memory  = smart_extract_lead(user_input, memory)
         missing = next_missing_field(memory)
         if missing:
             just_provided = memory.get(missing)
@@ -882,7 +1229,6 @@ if user_input := st.chat_input("Type your message here..."):
             memory["stage"]           = "order_done"
             memory["order_confirmed"] = True
             reply = final_confirmation_text(memory)
-            # ── Save to today's order log ──
             summary = memory.get("confirmed_summary", {})
             st.session_state.all_confirmed_orders.append({
                 "name":              memory.get("name"),
