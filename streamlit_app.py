@@ -86,6 +86,13 @@ def get_wc_creds():
 
 WC_URL, WC_KEY, WC_SECRET = get_wc_creds()
 
+# Basic Auth header — needed to access private + all products
+import base64
+def get_wc_auth_header():
+    credentials = f"{WC_KEY}:{WC_SECRET}"
+    encoded = base64.b64encode(credentials.encode()).decode()
+    return {"Authorization": f"Basic {encoded}"}
+
 # ─────────────────────────────────────────────
 # 4. WOOCOMMERCE — LIVE PRODUCTS  ← NEW
 #    Fetches all published products with price,
@@ -102,32 +109,58 @@ def fetch_wc_products() -> dict:
         print("[WC Products] No credentials — using fallback.")
         return {}
 
-    products = {}
-    page = 1
-    while True:
+    products  = {}
+    seen_keys = set()   # avoid city-duplicate products
+    page      = 1
+
+    while page <= 30:   # safety cap — 30 pages × 100 = 3000 products max
         try:
             resp = requests.get(
                 f"{WC_URL}/wp-json/wc/v3/products",
+                headers=get_wc_auth_header(),        # ← Basic Auth (reads private too)
                 params={
-                    "consumer_key":    WC_KEY,
-                    "consumer_secret": WC_SECRET,
-                    "per_page":        100,
-                    "page":            page,
-                    "status":          "publish",
+                    "per_page": 100,
+                    "page":     page,
+                    "status":   "publish,private",   # ← includes private 577
                 },
-                timeout=15,
+                timeout=20,
             )
             if resp.status_code != 200:
-                print(f"[WC Products] API error {resp.status_code}")
+                print(f"[WC Products] API error {resp.status_code}: {resp.text[:200]}")
                 break
             batch = resp.json()
             if not batch:
                 break
+
             for p in batch:
                 raw_name = p.get("name", "").strip()
                 if not raw_name:
                     continue
-                name = raw_name.lower()
+
+                # ── Extract product code like LG21, RP35, WG10 ──
+                code_match   = re.search(r':?\s*([A-Z]{1,3}\d{2,4})\s*$', raw_name, re.IGNORECASE)
+                product_code = code_match.group(1).upper() if code_match else None
+
+                # ── Deduplicate city SEO variants ──
+                # e.g. "Jasmine String Fort Wayne", "Jasmine String Charlotte" → same product
+                if product_code:
+                    base_name = raw_name   # keep full name with code e.g. "Lilly Wedding Garland: LG21"
+                else:
+                    base_name = re.sub(
+                        r'\s+(in\s+)?('
+                        r'fort wayne|charlotte|irvine|cerritos|atlanta|chicago|'
+                        r'los angeles|milpitas|huntington beach|north las vegas|'
+                        r'burbank|covington|destin|arlington|usa'
+                        r')\s*$',
+                        '', raw_name, flags=re.IGNORECASE
+                    ).strip()
+
+                name = base_name.lower()
+
+                # Skip duplicates
+                if name in seen_keys:
+                    continue
+
                 price_str = p.get("price") or p.get("regular_price") or "0"
                 try:
                     price = float(price_str)
@@ -136,8 +169,8 @@ def fetch_wc_products() -> dict:
                 if price <= 0:
                     continue
 
-                # Derive unit from product name (same logic as before)
-                unit = "piece"
+                # ── Derive unit from name ──
+                unit     = "piece"
                 name_low = name
                 if "5ft" in name_low or "5 ft" in name_low:
                     unit = "box (5 ft)"
@@ -156,15 +189,19 @@ def fetch_wc_products() -> dict:
                     "price": price,
                     "unit":  unit,
                     "stock": p.get("stock_status", "instock"),
+                    "code":  product_code,   # ← store LG21, RP35 etc.
                 }
+                seen_keys.add(name)
+
             page += 1
             if len(batch) < 100:
                 break
+
         except Exception as e:
             print(f"[WC Products] Request error: {e}")
             break
 
-    print(f"[WC Products] Loaded {len(products)} products from API.")
+    print(f"[WC Products] Loaded {len(products)} unique products from API.")
     return products
 
 
@@ -405,13 +442,22 @@ def load_knowledge_and_products() -> tuple[str, dict, str]:
 # Load once, cached for 1 hour
 WEBSITE_INFO, PRODUCTS, CATEGORIES_TEXT = load_knowledge_and_products()
 
+# ── Product code lookup map: {"LG21": "lilly wedding garland: lg21"} ──
+PRODUCT_CODE_MAP = {
+    v["code"]: name
+    for name, v in PRODUCTS.items()
+    if v.get("code")
+}
+
 PRODUCT_CATALOG_TEXT = "\n".join(
-    f"  - {name.title()}: ${v['price']:.2f} per {v['unit']}"
-    + (f" [OUT OF STOCK]" if v.get("stock") == "outofstock" else "")
+    f"  - {name.title()}"
+    + (f" [Code: {v['code']}]" if v.get("code") else "")
+    + f": ${v['price']:.2f} per {v['unit']}"
+    + (" [OUT OF STOCK]" if v.get("stock") == "outofstock" else "")
     for name, v in PRODUCTS.items()
 )
 
-ORDER_KEYWORDS = list(PRODUCTS.keys()) + [
+ORDER_KEYWORDS = list(PRODUCTS.keys()) + list(PRODUCT_CODE_MAP.keys()) + [
     "garland", "string", "flower", "veni", "jasmine", "rose", "carnation",
     "lily", "lilly", "mullai", "tulasi", "pooja", "temple", "wedding", "exchange",
     "marigold", "lotus", "gajra", "jadai", "bouquet", "door", "housewarming",
@@ -457,6 +503,24 @@ def calculate_shipping(zip_code: str, weight_lbs: float = 2.0) -> dict:
 def parse_order_items(text: str) -> list:
     found, seen = [], set()
     low = text.lower()
+
+    # ── Step 1: match product codes like LG21, RP35, WG10 ──
+    code_hits = re.findall(r'\b([A-Z]{1,3}\d{2,4})\b', text, re.IGNORECASE)
+    for code in code_hits:
+        mapped_name = PRODUCT_CODE_MAP.get(code.upper())
+        if mapped_name and mapped_name not in seen:
+            info      = PRODUCTS[mapped_name]
+            qty_match = re.search(r'(\d+)\s*(?:x\s*)?' + re.escape(code), text, re.IGNORECASE)
+            qty       = float(qty_match.group(1)) if qty_match else 1.0
+            found.append({
+                "name":       mapped_name,
+                "qty":        qty,
+                "unit_price": info["price"],
+                "unit":       info["unit"],
+            })
+            seen.add(mapped_name)
+
+    # ── Step 2: match by full product name as before ──
     for name, info in PRODUCTS.items():
         if name in low and name not in seen:
             match = re.search(
