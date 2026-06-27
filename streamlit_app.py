@@ -71,7 +71,7 @@ def get_llms():
 chat_llm, extract_llm = get_llms()
 
 # ─────────────────────────────────────────────
-# 3. WOOCOMMERCE CREDENTIALS  ← NEW
+# 3. WOOCOMMERCE CREDENTIALS
 # ─────────────────────────────────────────────
 def get_wc_creds():
     try:
@@ -94,7 +94,7 @@ def get_wc_auth_header():
     return {"Authorization": f"Basic {encoded}"}
 
 # ─────────────────────────────────────────────
-# 4. WOOCOMMERCE — LIVE PRODUCTS  ← NEW
+# 4. WOOCOMMERCE — LIVE PRODUCTS
 #    Fetches all published products with price,
 #    stock status, categories from the REST API.
 #    Cached 1 hour so it doesn't hammer the API.
@@ -206,7 +206,7 @@ def fetch_wc_products() -> dict:
 
 
 # ─────────────────────────────────────────────
-# 5. WOOCOMMERCE — FETCH TODAY'S WEBSITE ORDERS  ← NEW
+# 5. WOOCOMMERCE — FETCH TODAY'S WEBSITE ORDERS
 #    Pulls orders placed directly on the website
 #    (not via chat) for inclusion in daily email.
 # ─────────────────────────────────────────────
@@ -271,7 +271,7 @@ def fetch_wc_orders_today() -> list:
 
 
 # ─────────────────────────────────────────────
-# 6. WOOCOMMERCE — FETCH CATEGORIES  ← NEW
+# 6. WOOCOMMERCE — FETCH CATEGORIES
 #    Used to enrich the AI knowledge base with
 #    live category names and descriptions.
 # ─────────────────────────────────────────────
@@ -666,7 +666,7 @@ def smart_extract_lead(text: str, memory: dict) -> dict:
     return updated
 
 # ─────────────────────────────────────────────
-# 13. ENQUIRY TRACKER  ← NEW
+# 13. ENQUIRY TRACKER
 #     Records every customer question/topic so
 #     the daily email can summarise what people
 #     asked about, even if they didn't order.
@@ -835,7 +835,7 @@ def order_recap_text(memory: dict) -> str:
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────
-# 16. DAILY EMAIL — NOW WITH 3 SECTIONS  ← UPDATED
+# 16. DAILY EMAIL — WITH 3 SECTIONS
 #     Section 1: Website orders (WooCommerce API)
 #     Section 2: Chat orders (AI agent confirmed)
 #     Section 3: Chat enquiries summary
@@ -1082,7 +1082,7 @@ def build_email_html(chat_orders: list, website_orders: list, enquiries: list) -
 def send_daily_email(chat_orders: list, website_orders: list = None, enquiries: list = None) -> bool:
     """Send the daily summary email. Returns True on success."""
     if website_orders is None:
-        website_orders = fetch_wc_orders_today()   # ← fetch live from WooCommerce
+        website_orders = fetch_wc_orders_today()
     if enquiries is None:
         enquiries = st.session_state.get("enquiries", [])
 
@@ -1159,7 +1159,7 @@ def init_session():
         st.session_state.lc_history = []
     if "all_confirmed_orders" not in st.session_state:
         st.session_state.all_confirmed_orders = []
-    if "enquiries" not in st.session_state:        # ← NEW
+    if "enquiries" not in st.session_state:
         st.session_state.enquiries = []
     if "email_sent_date" not in st.session_state:
         st.session_state.email_sent_date = None
@@ -1184,19 +1184,6 @@ if todays_chat_orders:
 if st.session_state.get("email_sent_date") == get_today_str():
     st.sidebar.success("✅ Summary email sent today")
 
-if st.sidebar.button("📤 Send Summary Email Now", use_container_width=True):
-    with st.sidebar:
-        with st.spinner("Fetching website orders & sending email..."):
-            website_orders = fetch_wc_orders_today()
-            success        = send_daily_email(
-                todays_chat_orders, website_orders, todays_enquiries
-            )
-        if success:
-            st.session_state["email_sent_date"] = get_today_str()
-            st.success(f"✅ Email sent! ({len(website_orders)} website orders + {len(todays_chat_orders)} chat orders)")
-        else:
-            st.error("❌ Failed — check Gmail credentials in Streamlit secrets")
-
 # ─────────────────────────────────────────────
 # 18. DISPLAY CHAT HISTORY
 # ─────────────────────────────────────────────
@@ -1218,7 +1205,7 @@ if user_input := st.chat_input("Type your message here..."):
     lowered = user_input.lower().strip()
     stage   = memory.get("stage", "lead_capture")
 
-    # ── Track every message as an enquiry  ← NEW ──
+    # ── Track every message as an enquiry ──
     track_enquiry(user_input, memory)
 
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -1294,6 +1281,8 @@ if user_input := st.chat_input("Type your message here..."):
             memory["order_confirmed"] = True
             reply = final_confirmation_text(memory)
             summary = memory.get("confirmed_summary", {})
+
+            # ── Append to confirmed orders list ──
             st.session_state.all_confirmed_orders.append({
                 "name":              memory.get("name"),
                 "phone":             memory.get("phone"),
@@ -1304,6 +1293,20 @@ if user_input := st.chat_input("Type your message here..."):
                 "grand_total":       summary.get("grand_total", 0),
                 "confirmed_at":      datetime.datetime.now().strftime("%I:%M %p"),
             })
+
+            # ── Trigger email immediately on order confirmation ──
+            try:
+                website_orders = fetch_wc_orders_today()
+                send_daily_email(
+                    st.session_state.all_confirmed_orders,
+                    website_orders,
+                    st.session_state.get("enquiries", [])
+                )
+                st.session_state["email_sent_date"] = get_today_str()
+                print(f"[Auto Email] Sent on order confirmation for {memory.get('name')}")
+            except Exception as e:
+                print(f"[Auto email error]: {e}")
+
         elif any(t in lowered for t in ["no", "change", "wrong", "different", "edit", "modify"]):
             memory["stage"]          = "order_building"
             memory["order_items"]    = []
