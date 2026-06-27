@@ -504,6 +504,9 @@ def parse_order_items(text: str) -> list:
     found, seen = [], set()
     low = text.lower()
 
+    # Products that REQUIRE an explicit quantity — skip if none given
+    PER_FOOT_UNITS = {"per foot", "per foot (total both sides)", "per foot (each side)"}
+
     # ── Step 1: match product codes like LG21, RP35, WG10 ──
     code_hits = re.findall(r'\b([A-Z]{1,3}\d{2,4})\b', text, re.IGNORECASE)
     for code in code_hits:
@@ -511,7 +514,9 @@ def parse_order_items(text: str) -> list:
         if mapped_name and mapped_name not in seen:
             info      = PRODUCTS[mapped_name]
             qty_match = re.search(r'(\d+)\s*(?:x\s*)?' + re.escape(code), text, re.IGNORECASE)
-            qty       = float(qty_match.group(1)) if qty_match else 1.0
+            if not qty_match and info["unit"] in PER_FOOT_UNITS:
+                continue   # skip — need explicit feet for per-foot products
+            qty = float(qty_match.group(1)) if qty_match else 1.0
             found.append({
                 "name":       mapped_name,
                 "qty":        qty,
@@ -520,7 +525,7 @@ def parse_order_items(text: str) -> list:
             })
             seen.add(mapped_name)
 
-    # ── Step 2: match by full product name as before ──
+    # ── Step 2: match by full product name ──
     for name, info in PRODUCTS.items():
         if name in low and name not in seen:
             match = re.search(
@@ -529,6 +534,11 @@ def parse_order_items(text: str) -> list:
             )
             if not match:
                 match = re.search(r'(\d+(?:\.\d+)?)\s*' + re.escape(name), low)
+
+            # For per-foot products, require an explicit number — never default to 1
+            if not match and info["unit"] in PER_FOOT_UNITS:
+                continue   # skip — ask the customer how many feet
+
             qty = float(match.group(1)) if match else 1.0
             found.append({
                 "name":       name,
@@ -538,7 +548,6 @@ def parse_order_items(text: str) -> list:
             })
             seen.add(name)
     return found
-
 def build_order_summary(items: list, zip_code: str) -> dict:
     subtotal    = sum(i["qty"] * i["unit_price"] for i in items)
     weight      = len(items) * 1.5
@@ -813,6 +822,9 @@ CRITICAL RULES:
 - NEVER recalculate or adjust shipping — the system handles shipping automatically
 - NEVER offer local pickup — all orders are shipped, no exceptions
 - If a customer mentions local pickup, politely inform them all orders are shipped only
+- NEVER show a price or order breakdown unless you know BOTH the product AND the quantity
+- For garlands: always ask how many feet first before showing any price
+- For strings/loose flowers: always ask how many boxes or pieces first
 - Keep replies SHORT and warm
 """
 
@@ -1396,9 +1408,11 @@ if user_input := st.chat_input("Type your message here..."):
         else:
             context_parts.append(
                 "\nINSTRUCTION: Ask warmly what flowers/garlands they need. "
-                "Get specifics: product type, quantity, size. "
+                "For garlands, ALWAYS ask how many feet before showing any price. "
+                "For strings/loose flowers, ALWAYS ask how many boxes/pieces/grams. "
+                "NEVER show a price or breakdown until you have the product AND quantity. "
                 "Do NOT ask about occasion or purpose. "
-                "Once you understand the order, ask them to say 'confirm'."
+                "Once you have product + quantity, ask them to say 'confirm'."
             )
 
         augmented_input = "\n".join(context_parts) + f"\n\n---\nCustomer: {user_input}"
