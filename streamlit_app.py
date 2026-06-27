@@ -673,16 +673,17 @@ def smart_extract_lead(text: str, memory: dict) -> dict:
 # ─────────────────────────────────────────────
 def track_enquiry(user_text: str, memory: dict):
     """
-    Saves a timestamped enquiry record to session state.
-    Only tracks messages that contain real product/occasion interest.
-    Skips short confirmations, filler words, and lead capture answers.
+    ONE enquiry record per customer per session.
+    Creates the record on the first meaningful message,
+    then updates topics/message as the conversation continues.
+    Skips filler / confirmation / lead-capture-only messages entirely.
     """
     if "enquiries" not in st.session_state:
         st.session_state.enquiries = []
 
     low = user_text.lower().strip()
 
-    # ── Skip short filler / confirmation messages ──
+    # ── Skip filler / confirmation words ──
     IGNORE_PHRASES = {
         "ok", "okay", "yes", "no", "confirm", "proceed", "sure", "great",
         "thanks", "thank you", "thank", "hi", "hello", "hey", "fine",
@@ -693,41 +694,51 @@ def track_enquiry(user_text: str, memory: dict):
     if low in IGNORE_PHRASES:
         return
 
-    # ── Skip very short messages (under 4 words) with no product keyword ──
+    # ── Skip pure lead-capture answers (phone / email / zip) ──
+    if re.fullmatch(r'[\d\s\-\(\)\+]{7,15}', user_text.strip()):
+        return
+    if re.fullmatch(r'[\w.\-+]+@[\w\-]+\.[a-z]{2,}', user_text.strip()):
+        return
+    if re.fullmatch(r'\d{5}', user_text.strip()):
+        return
+
+    # ── Skip short messages with no product/occasion keyword ──
     words = low.split()
     has_product_keyword  = any(kw in low for kw in ORDER_KEYWORDS if len(kw) > 3)
     has_occasion_keyword = any(kw in low for kw in [
         "wedding", "pooja", "temple", "birthday", "engagement",
         "housewarming", "festival", "puja"
     ])
-
     if len(words) < 4 and not has_product_keyword and not has_occasion_keyword:
         return
 
-    # ── Skip pure lead-capture answers (phone / email / zip / name only) ──
-    is_just_phone = bool(re.fullmatch(r'[\d\s\-\(\)\+]{7,15}', user_text.strip()))
-    is_just_email = bool(re.fullmatch(r'[\w.\-+]+@[\w\-]+\.[a-z]{2,}', user_text.strip()))
-    is_just_zip   = bool(re.fullmatch(r'\d{5}', user_text.strip()))
-    if is_just_phone or is_just_email or is_just_zip:
-        return
-
-    # ── Only reach here if the message has real enquiry substance ──
-    topics = []
+    # ── Collect topics from this message ──
+    new_topics = []
     for kw in ["wedding", "pooja", "temple", "birthday", "engagement",
                "housewarming", "festival", "puja"]:
         if kw in low:
-            topics.append(kw)
+            new_topics.append(kw)
     for kw in ORDER_KEYWORDS[:30]:
         if kw in low and len(kw) > 4:
-            topics.append(kw)
+            new_topics.append(kw)
 
-    enquiry = {
-        "time":      datetime.datetime.now().strftime("%I:%M %p"),
-        "customer":  memory.get("name", "Unknown"),
-        "message":   user_text[:200],
-        "topics":    list(set(topics)) or ["general inquiry"],
-    }
-    st.session_state.enquiries.append(enquiry)
+    customer_key = memory.get("name", "Unknown")
+
+    # ── Find existing enquiry for this customer and UPDATE it (no duplicates) ──
+    for existing in st.session_state.enquiries:
+        if existing["customer"] == customer_key:
+            existing["topics"]  = list(set(existing["topics"] + new_topics)) or ["general inquiry"]
+            existing["message"] = user_text[:200]
+            existing["time"]    = datetime.datetime.now().strftime("%I:%M %p")
+            return
+
+    # ── No existing record — create one (first meaningful message only) ──
+    st.session_state.enquiries.append({
+        "time":     datetime.datetime.now().strftime("%I:%M %p"),
+        "customer": customer_key,
+        "message":  user_text[:200],
+        "topics":   list(set(new_topics)) or ["general inquiry"],
+    })
 
 
 def build_enquiry_summary_text() -> str:
