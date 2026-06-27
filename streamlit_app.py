@@ -674,20 +674,50 @@ def smart_extract_lead(text: str, memory: dict) -> dict:
 def track_enquiry(user_text: str, memory: dict):
     """
     Saves a timestamped enquiry record to session state.
-    Called on every customer message.
+    Only tracks messages that contain real product/occasion interest.
+    Skips short confirmations, filler words, and lead capture answers.
     """
     if "enquiries" not in st.session_state:
         st.session_state.enquiries = []
 
-    low = user_text.lower()
+    low = user_text.lower().strip()
 
-    # Detect what the customer was asking about
+    # ── Skip short filler / confirmation messages ──
+    IGNORE_PHRASES = {
+        "ok", "okay", "yes", "no", "confirm", "proceed", "sure", "great",
+        "thanks", "thank you", "thank", "hi", "hello", "hey", "fine",
+        "got it", "sounds good", "looks good", "go ahead", "yes confirm",
+        "i confirm", "yes proceed", "finalize", "that's correct",
+        "looks correct", "place order", "confirm order",
+    }
+    if low in IGNORE_PHRASES:
+        return
+
+    # ── Skip very short messages (under 4 words) with no product keyword ──
+    words = low.split()
+    has_product_keyword  = any(kw in low for kw in ORDER_KEYWORDS if len(kw) > 3)
+    has_occasion_keyword = any(kw in low for kw in [
+        "wedding", "pooja", "temple", "birthday", "engagement",
+        "housewarming", "festival", "puja"
+    ])
+
+    if len(words) < 4 and not has_product_keyword and not has_occasion_keyword:
+        return
+
+    # ── Skip pure lead-capture answers (phone / email / zip / name only) ──
+    is_just_phone = bool(re.fullmatch(r'[\d\s\-\(\)\+]{7,15}', user_text.strip()))
+    is_just_email = bool(re.fullmatch(r'[\w.\-+]+@[\w\-]+\.[a-z]{2,}', user_text.strip()))
+    is_just_zip   = bool(re.fullmatch(r'\d{5}', user_text.strip()))
+    if is_just_phone or is_just_email or is_just_zip:
+        return
+
+    # ── Only reach here if the message has real enquiry substance ──
     topics = []
     for kw in ["wedding", "pooja", "temple", "birthday", "engagement",
                "housewarming", "festival", "puja"]:
         if kw in low:
             topics.append(kw)
-    for kw in ORDER_KEYWORDS[:30]:   # top product keywords
+    for kw in ORDER_KEYWORDS[:30]:
         if kw in low and len(kw) > 4:
             topics.append(kw)
 
