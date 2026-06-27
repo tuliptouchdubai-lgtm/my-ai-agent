@@ -771,13 +771,14 @@ def build_enquiry_summary_text() -> str:
 SYSTEM_PROMPT = f"""You are Priya, a warm sales assistant for The Indian Flowers USA (Malar Traders).
 
 YOUR ROLE:
-- Help customers find the right flowers/garlands for their occasion
-- Ask about their needs, occasion, and preferences warmly
+- Help customers find the right flowers/garlands they need
+- Ask about what products they want and how many — keep it simple and direct
 - Present prices EXACTLY as given in the ORDER BREAKDOWN block — NEVER recalculate
 - Keep replies SHORT — 2 to 4 sentences max
 - Use the customer's name warmly
 - Ask ONE question at a time only
 - NEVER mention product codes
+- NEVER ask about the occasion — customers just want to order flowers
 - If a product shows [OUT OF STOCK], apologize and suggest a similar available product
 
 LIVE WEBSITE CONTENT (updated every hour):
@@ -806,6 +807,7 @@ PAYMENT: Zelle to "Malar Traders" only.
 
 CRITICAL RULES:
 - NEVER assume an order — always ask what the customer wants
+- NEVER ask about occasion or purpose of the order
 - NEVER show a price unless ORDER BREAKDOWN is in context
 - NEVER recalculate prices from the ORDER BREAKDOWN
 - Keep replies SHORT and warm
@@ -1209,8 +1211,8 @@ init_session()
 maybe_auto_send_email()
 
 # ── Sidebar ──
-wc_status = "✅ WooCommerce API" if WC_KEY else "⚠️ Fallback prices"
-st.sidebar.success(f"{wc_status} — {len(PRODUCTS)} products loaded")
+wc_status = "✅ WooCommerce API Connected" if WC_KEY else "⚠️ Using fallback prices"
+st.sidebar.success(wc_status)
 
 st.sidebar.divider()
 st.sidebar.subheader("📧 Daily Order Summary")
@@ -1276,7 +1278,7 @@ if user_input := st.chat_input("Type your message here..."):
                     reply = (
                         f"Wonderful, {name}! 🌺 Thank you for your details.\n\n"
                         "What can I help you with today? Are you looking for wedding garlands, "
-                        "temple flowers, jasmine strings, or something else? And what's the occasion? 😊"
+                        "temple flowers, jasmine strings, or something else? 😊"
                     )
         else:
             memory["stage"] = "need_discovery"
@@ -1284,7 +1286,7 @@ if user_input := st.chat_input("Type your message here..."):
             reply = (
                 f"Wonderful, {name}! 🌺 Thank you for your details.\n\n"
                 "What can I help you with today? Are you looking for wedding garlands, "
-                "temple flowers, jasmine strings, or something else? And what's the occasion? 😊"
+                "temple flowers, jasmine strings, or something else? 😊"
             )
 
     # ── STAGE 2: NEED DISCOVERY ────────────────────────────────────────
@@ -1376,8 +1378,6 @@ if user_input := st.chat_input("Type your message here..."):
             f"ZIP     : {memory.get('zip_code')}",
             f"Stage   : {memory.get('stage')}",
         ]
-        if memory.get("occasion"):
-            context_parts.append(f"Occasion: {memory['occasion']}")
         if memory.get("raw_order_text"):
             context_parts.append(f"Order so far: \"{memory['raw_order_text']}\"")
         if memory.get("order_items") and memory.get("zip_code"):
@@ -1388,8 +1388,9 @@ if user_input := st.chat_input("Type your message here..."):
             )
         else:
             context_parts.append(
-                "\nINSTRUCTION: Ask warmly what flowers/garlands they need and for what occasion. "
+                "\nINSTRUCTION: Ask warmly what flowers/garlands they need. "
                 "Get specifics: product type, quantity, size. "
+                "Do NOT ask about occasion or purpose. "
                 "Once you understand the order, ask them to say 'confirm'."
             )
 
