@@ -810,6 +810,9 @@ CRITICAL RULES:
 - NEVER ask about occasion or purpose of the order
 - NEVER show a price unless ORDER BREAKDOWN is in context
 - NEVER recalculate prices from the ORDER BREAKDOWN
+- NEVER recalculate or adjust shipping — the system handles shipping automatically
+- NEVER offer local pickup — all orders are shipped, no exceptions
+- If a customer mentions local pickup, politely inform them all orders are shipped only
 - Keep replies SHORT and warm
 """
 
@@ -843,9 +846,11 @@ def order_confirmation_text(memory: dict) -> str:
     return "\n".join(lines)
 
 def final_confirmation_text(memory: dict) -> str:
-    summary = memory.get("confirmed_summary") or build_order_summary(
-        memory["order_items"], memory["zip_code"]
-    )
+    # ALWAYS use the locked summary shown to the customer — NEVER recalculate
+    summary = memory.get("confirmed_summary")
+    if not summary:
+        summary = build_order_summary(memory["order_items"], memory["zip_code"])
+        memory["confirmed_summary"] = summary   # lock it immediately
     name  = memory.get("name", "there")
     lines = [f"🎉 **Thank you, {name}! Your order is confirmed.**\n"]
     for item in summary["items"]:
@@ -853,8 +858,10 @@ def final_confirmation_text(memory: dict) -> str:
             f"• {item['qty']} x {item['name'].title()} "
             f"— **${item['qty'] * item['unit_price']:.2f}**"
         )
-    lines.append(f"\n**Shipping ({summary['shipping']['method']}):** ${summary['shipping']['fee']:.2f}")
-    lines.append(f"**Grand Total: ${summary['grand_total']:.2f}**")
+    lines.append(f"\n**Subtotal:** ${summary['subtotal']:.2f}")
+    lines.append(f"**Shipping ({summary['shipping']['method']}):** ${summary['shipping']['fee']:.2f}")
+    lines.append(f"**────────────────────────────**")
+    lines.append(f"🧾 **Grand Total: ${summary['grand_total']:.2f}**")
     lines.append(f"\n💳 Please send **${summary['grand_total']:.2f}** via **Zelle to Malar Traders**.")
     lines.append("\n✅ Our team will send your receipt and delivery update shortly. Wishing you a beautiful celebration! 🌺")
     return "\n".join(lines)
